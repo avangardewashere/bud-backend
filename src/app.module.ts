@@ -8,6 +8,7 @@ import { RolesGuard } from './auth/guards/roles.guard.js';
 import { SessionGuard } from './auth/guards/session.guard.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { AppConfigModule, AppConfigService } from './config/index.js';
+import { CourseSpecModule } from './course-spec/course-spec.module.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/index.js';
 
@@ -53,6 +54,7 @@ import { PrismaModule } from './prisma/index.js';
 
     PrismaModule,
     AuthModule,
+    CourseSpecModule,
     HealthModule,
   ],
   providers: [

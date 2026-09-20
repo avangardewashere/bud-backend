@@ -1,0 +1,107 @@
+{
+  "spec": "bud-course/1",
+  "id": "docker-fundamentals",
+  "title": "Docker: 10-Session Course",
+  "version": "1.0.0",
+  "summary": "Containerize a real app, run a multi-service stack, ship from CI, deploy to a VPS.",
+  "level": "beginner-intermediate",
+  "estimatedHours": 30,
+  "tags": ["docker", "devops", "containers"],
+  "outline": "docker-10-session-course.md",
+  "cover": null,
+  "theme": { "accent": "#1E6FA8" },
+  "storageKeys": [
+    "docker-course:state",
+    "docker-course:session-2",
+    "docker-course:session-3",
+    "docker-course:session-4",
+    "docker-course:session-5",
+    "docker-course:session-6",
+    "docker-course:session-7",
+    "docker-course:session-8",
+    "docker-course:session-9",
+    "docker-course:session-10"
+  ],
+  "sessions": [
+    {
+      "id": "s1",
+      "order": 1,
+      "title": "The container mental model",
+      "entry": "docker-session-1-worksheet.html",
+      "weight": "light",
+      "deliverable": "notes.md explaining image vs container, plus nginx served from a container"
+    },
+    {
+      "id": "s2",
+      "order": 2,
+      "title": "Images, layers, and the CLI you'll actually use",
+      "entry": "docker-session-2-worksheet.html",
+      "weight": "light",
+      "deliverable": "A personal docker-cheatsheet.md written in your own words"
+    },
+    {
+      "id": "s3",
+      "order": 3,
+      "title": "Your first Dockerfile",
+      "entry": "docker-session-3-worksheet.html",
+      "weight": "medium",
+      "deliverable": "A committed Dockerfile for a working API, plus why package.json is copied first"
+    },
+    {
+      "id": "s4",
+      "order": 4,
+      "title": "Containerizing React and Next.js",
+      "entry": "docker-session-4-worksheet.html",
+      "weight": "heavy",
+      "deliverable": "Your capstone frontend running in both a dev and a prod container"
+    },
+    {
+      "id": "s5",
+      "order": 5,
+      "title": "Multi-stage builds and image optimization",
+      "entry": "docker-session-5-worksheet.html",
+      "weight": "heavy",
+      "deliverable": "A before/after size table and a production image under your size budget"
+    },
+    {
+      "id": "s6",
+      "order": 6,
+      "title": "Data: volumes, bind mounts, and persistence",
+      "entry": "docker-session-6-worksheet.html",
+      "weight": "medium",
+      "deliverable": "A database container with a persistence proof (data survives docker rm)"
+    },
+    {
+      "id": "s7",
+      "order": 7,
+      "title": "Networking and Docker Compose",
+      "entry": "docker-session-7-worksheet.html",
+      "weight": "heavy",
+      "deliverable": "Your whole capstone stack starting with one docker compose up"
+    },
+    {
+      "id": "s8",
+      "order": 8,
+      "title": "Configuration, environments, and secrets",
+      "entry": "docker-session-8-worksheet.html",
+      "weight": "light",
+      "deliverable": "A dev/prod configuration split and a note on where secrets live at each stage"
+    },
+    {
+      "id": "s9",
+      "order": 9,
+      "title": "Docker in CI/CD with GitHub Actions",
+      "entry": "docker-session-9-worksheet.html",
+      "weight": "heavy",
+      "deliverable": "A green workflow that builds, tests, scans, and pushes a tagged image"
+    },
+    {
+      "id": "s10",
+      "order": 10,
+      "title": "Running containers in production",
+      "entry": "docker-session-10-worksheet.html",
+      "weight": "heavy",
+      "deliverable": "A live URL serving your containerized app, plus a README on the architecture"
+    }
+  ]
+}
