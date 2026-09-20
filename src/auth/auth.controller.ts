@@ -8,12 +8,15 @@ import {
   Req,
   Res,
   HttpException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import {
   ApiBody,
   ApiConflictResponse,
   ApiCookieAuth,
+  ApiCreatedResponse,
   ApiForbiddenResponse,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -28,9 +31,12 @@ import type { AuthenticatedRequest, PublicUser, RequestUser } from './auth.types
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
 import {
+  changePasswordResultSchema,
   changePasswordSchema,
+  errorSchema,
   loginSchema,
   registerSchema,
+  userEnvelopeSchema,
   type ChangePasswordInput,
   type LoginInput,
   type RegisterInput,
@@ -57,8 +63,18 @@ export class AuthController {
       'On success the session cookie is set, so the caller is signed in immediately.',
   })
   @ApiBody({ schema: openApiSchema(registerSchema) })
-  @ApiForbiddenResponse({ description: 'Signup closed, or the invite is invalid/expired.' })
-  @ApiConflictResponse({ description: 'That email address is already registered.' })
+  @ApiCreatedResponse({
+    description: 'Account created and signed in; the session cookie is set.',
+    schema: openApiSchema(userEnvelopeSchema, 'output'),
+  })
+  @ApiForbiddenResponse({
+    description: 'Signup closed, or the invite is invalid/expired.',
+    schema: openApiSchema(errorSchema, 'output'),
+  })
+  @ApiConflictResponse({
+    description: 'That email address is already registered.',
+    schema: openApiSchema(errorSchema, 'output'),
+  })
   async register(
     @Body(zodBody(registerSchema)) input: RegisterInput,
     @Req() request: AuthenticatedRequest,
@@ -75,8 +91,18 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Sign in with email and password' })
   @ApiBody({ schema: openApiSchema(loginSchema) })
-  @ApiUnauthorizedResponse({ description: 'Invalid email or password.' })
-  @ApiTooManyRequestsResponse({ description: 'Too many failed attempts; try again later.' })
+  @ApiOkResponse({
+    description: 'Signed in; the session cookie is set.',
+    schema: openApiSchema(userEnvelopeSchema, 'output'),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Invalid email or password.',
+    schema: openApiSchema(errorSchema, 'output'),
+  })
+  @ApiTooManyRequestsResponse({
+    description: 'Too many failed attempts; try again later. See Retry-After.',
+    schema: openApiSchema(errorSchema, 'output'),
+  })
   async login(
     @Body(zodBody(loginSchema)) input: LoginInput,
     @Req() request: AuthenticatedRequest,
@@ -116,6 +142,7 @@ export class AuthController {
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiCookieAuth()
   @ApiOperation({ summary: 'Sign out and destroy the current session' })
+  @ApiNoContentResponse({ description: 'Signed out; the cookie is cleared.' })
   async logout(
     @Req() request: AuthenticatedRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
@@ -134,7 +161,14 @@ export class AuthController {
     description: 'Signs out every other session for this account.',
   })
   @ApiBody({ schema: openApiSchema(changePasswordSchema) })
-  @ApiUnauthorizedResponse({ description: 'Current password is incorrect.' })
+  @ApiOkResponse({
+    description: 'Password changed; every other session was signed out.',
+    schema: openApiSchema(changePasswordResultSchema, 'output'),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Current password is incorrect.',
+    schema: openApiSchema(errorSchema, 'output'),
+  })
   async changePassword(
     @Body(zodBody(changePasswordSchema)) input: ChangePasswordInput,
     @CurrentUser() user: RequestUser,
@@ -164,12 +198,30 @@ export class AuthController {
 @ApiTags('me')
 @Controller('me')
 export class MeController {
+  constructor(private readonly auth: AuthService) {}
+
   @Get()
   @ApiCookieAuth()
   @ApiOperation({ summary: 'The signed-in user' })
-  @ApiOkResponse({ description: 'The current user.' })
-  @ApiUnauthorizedResponse({ description: 'No valid session.' })
-  me(@CurrentUser() user: RequestUser): { user: RequestUser } {
-    return { user };
+  @ApiOkResponse({
+    description: 'The current user.',
+    schema: openApiSchema(userEnvelopeSchema, 'output'),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'No valid session.',
+    schema: openApiSchema(errorSchema, 'output'),
+  })
+  async me(@CurrentUser() user: RequestUser): Promise<{ user: PublicUser }> {
+    // Re-read rather than echoing the guard's slice: /me must return the same
+    // user shape as login and register, or the generated client ends up with
+    // two different User types for one concept. It also means a profile edit
+    // is reflected immediately instead of at next sign-in.
+    const fresh = await this.auth.findById(user.id);
+
+    if (!fresh) {
+      throw new UnauthorizedException('Your account is no longer available.');
+    }
+
+    return { user: AuthService.toPublicUser(fresh) };
   }
 }

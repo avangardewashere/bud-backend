@@ -46,3 +46,36 @@ export const changePasswordSchema = z.object({
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+// ── responses ───────────────────────────────────────────────────────────────
+//
+// The shell generates its typed client straight from /docs/openapi.json, so a
+// response without a schema becomes `unknown` on the other side. These describe
+// the JSON on the wire — dates are ISO strings here, not Date objects.
+
+/** One user shape for the whole API. /me and the auth endpoints agree. */
+export const publicUserSchema = z.object({
+  id: z.uuid(),
+  email: z.email(),
+  name: z.string(),
+  role: z.enum(['learner', 'admin']),
+  avatarUrl: z.string().nullable(),
+  timezone: z.string(),
+  createdAt: z.iso.datetime(),
+});
+
+export const userEnvelopeSchema = z.object({ user: publicUserSchema });
+
+export const changePasswordResultSchema = z.object({
+  /** How many other sessions were signed out. */
+  revokedSessions: z.int().nonnegative(),
+});
+
+export const errorSchema = z.object({
+  statusCode: z.int(),
+  error: z.string(),
+  message: z.string(),
+  errors: z.array(z.object({ path: z.string(), message: z.string(), code: z.string() })).optional(),
+  path: z.string(),
+  timestamp: z.iso.datetime(),
+});
