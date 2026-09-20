@@ -17,9 +17,7 @@ import type { ValidationCode, ValidationReport } from './validation.types.js';
  */
 const realManifest = JSON.parse(
   readFileSync(
-    fileURLToPath(
-      new URL('../../test/fixtures/docker-fundamentals.manifest.json', import.meta.url),
-    ),
+    fileURLToPath(new URL('../../test/fixtures/course-package/bud.manifest.json', import.meta.url)),
     'utf8',
   ),
 ) as CourseManifest;

@@ -5,6 +5,17 @@ import {
   errorSchema,
   publicUserSchema,
 } from '../auth/dto/auth.schemas.js';
+import { validationResultSchema } from '../course-spec/validation.types.js';
+import {
+  adminCourseListSchema,
+  adminCourseSchema,
+  courseDetailSchema,
+  courseListSchema,
+  courseSessionSchema,
+  courseSummarySchema,
+  ingestResultSchema,
+  progressSummarySchema,
+} from '../courses/dto/course.schemas.js';
 import { openApiSchema } from '../common/validation/zod.pipe.js';
 
 /**
@@ -37,6 +48,20 @@ export const componentSchemas = {
 
   /** The one error shape the whole API uses. */
   ErrorResponse: openApiSchema(errorSchema, 'output'),
+
+  // ── catalog ───────────────────────────────────────────────────────────────
+  ProgressSummary: openApiSchema(progressSummarySchema, 'output'),
+  CourseSummary: openApiSchema(courseSummarySchema, 'output'),
+  CourseSession: openApiSchema(courseSessionSchema, 'output'),
+  CourseDetail: openApiSchema(courseDetailSchema, 'output'),
+  CourseList: openApiSchema(courseListSchema, 'output'),
+
+  // ── admin ─────────────────────────────────────────────────────────────────
+  AdminCourse: openApiSchema(adminCourseSchema, 'output'),
+  AdminCourseList: openApiSchema(adminCourseListSchema, 'output'),
+  /** One line of the validation checklist the admin panel renders. */
+  ValidationResult: openApiSchema(validationResultSchema, 'output'),
+  IngestResult: openApiSchema(ingestResultSchema, 'output'),
 } satisfies Record<string, SchemaObject>;
 
 export type ComponentName = keyof typeof componentSchemas;

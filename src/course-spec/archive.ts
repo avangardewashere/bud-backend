@@ -20,8 +20,13 @@ export interface ArchiveLimits {
   maxArchiveBytes: number;
   /** Cap on the total declared uncompressed size — the zip-bomb guard. */
   maxTotalUncompressedBytes: number;
-  /** Cap on any single file we decompress to read. */
+  /** Cap on any single file we decompress to *inspect* (manifest, HTML). */
   maxReadableFileBytes: number;
+  /**
+   * Cap on any single file we decompress to *store*. Higher than the inspection
+   * cap: a cover image or a font is legitimately larger than any HTML we parse.
+   */
+  maxStoredFileBytes?: number;
   /** Refuse absurd entry counts before doing any work per entry. */
   maxEntries: number;
 }
@@ -30,6 +35,7 @@ export const DEFAULT_ARCHIVE_LIMITS: ArchiveLimits = {
   maxArchiveBytes: 50 * 1024 * 1024,
   maxTotalUncompressedBytes: 200 * 1024 * 1024,
   maxReadableFileBytes: 2 * 1024 * 1024,
+  maxStoredFileBytes: 25 * 1024 * 1024,
   maxEntries: 5_000,
 };
 
@@ -308,6 +314,77 @@ export async function readArchive(
     strippedRoot,
     totalUncompressedBytes,
   };
+}
+
+/**
+ * Second pass over an already-validated archive, yielding each file's bytes so
+ * the caller can stream them into object storage.
+ *
+ * Deliberately separate from `readArchive`: validation decompresses only the
+ * manifest and the HTML, and it would be wrong to hold an entire package in
+ * memory just to decide whether it is acceptable. Call this only after
+ * `readArchive` reported no violations — it repeats the path normalisation but
+ * assumes the safety questions are already answered.
+ */
+export async function extractFiles(
+  buffer: Buffer,
+  limits: ArchiveLimits = DEFAULT_ARCHIVE_LIMITS,
+): Promise<Map<string, Buffer>> {
+  const zipfile = await openZip(buffer);
+  const collected: { entry: Entry; normalised: string }[] = [];
+
+  await new Promise<void>((resolve, reject) => {
+    zipfile.on('error', reject);
+    zipfile.on('end', resolve);
+
+    zipfile.on('entry', (entry: Entry) => {
+      const normalised = normaliseEntryPath(entryName(entry));
+      if (normalised !== null && !isSymlink(entry) && !normalised.endsWith('/')) {
+        collected.push({ entry, normalised });
+      }
+      zipfile.readEntry();
+    });
+
+    zipfile.readEntry();
+  });
+
+  const strippedRoot = findCommonRoot(collected.map((c) => c.normalised));
+  const files = new Map<string, Buffer>();
+
+  for (const { entry, normalised } of collected) {
+    const path = strippedRoot ? normalised.slice(strippedRoot.length + 1) : normalised;
+    const cap = limits.maxStoredFileBytes ?? DEFAULT_ARCHIVE_LIMITS.maxStoredFileBytes!;
+    files.set(path, await readEntryBytes(zipfile, entry, cap));
+  }
+
+  zipfile.close();
+  return files;
+}
+
+function readEntryBytes(zipfile: ZipFile, entry: Entry, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    zipfile.openReadStream(entry, (err, stream) => {
+      if (err || !stream) {
+        reject(err ?? new Error('Could not open entry'));
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      let total = 0;
+
+      stream.on('data', (chunk: Buffer) => {
+        total += chunk.length;
+        if (total > maxBytes) {
+          stream.destroy();
+          reject(new Error(`Entry exceeds ${maxBytes} bytes`));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      stream.on('error', reject);
+      stream.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+  });
 }
 
 export function formatBytes(bytes: number): string {

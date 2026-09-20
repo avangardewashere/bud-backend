@@ -86,7 +86,9 @@ services:
 
   # S3-compatible storage for course packages. Console at http://localhost:9001
   minio:
-    image: minio/minio
+    # quay.io rather than Docker Hub: Hub is unreachable from this machine, and
+    # MinIO publishes the same image to both. Override with MINIO_IMAGE.
+    image: ${MINIO_IMAGE:-quay.io/minio/minio:latest}
     restart: unless-stopped
     command: server /data --console-address ":9001"
     ports:
@@ -107,7 +109,7 @@ services:
   # Creates the course bucket once, then exits. Without this the first upload
   # fails against an empty MinIO.
   minio-init:
-    image: minio/mc
+    image: ${MINIO_MC_IMAGE:-quay.io/minio/mc:latest}
     depends_on:
       minio:
         condition: service_healthy

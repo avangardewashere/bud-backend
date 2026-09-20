@@ -57,6 +57,20 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      # Course ingestion writes to object storage, so the e2e job needs a real
+      # S3 endpoint rather than a mock: getting the content types, prefixes and
+      # path-style addressing wrong is exactly what this job should catch.
+      minio:
+        image: quay.io/minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports: ['9000:9000']
+        options: >-
+          --health-cmd "mc ready local"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     env:
       NODE_ENV: test
       DATABASE_URL: postgresql://bud:bud@localhost:5432/bud?schema=public
@@ -93,6 +107,10 @@ jobs:
           done
           curl -fsS http://localhost:3102/ready
 
+      - name: Ingest and publish the Docker course
+        run: |
+          npm run course:ingest -- test/fixtures/course-package --publish
+
       - name: Sign in as the seeded admin
         run: |
           curl -fsS -c cookies.txt -X POST http://localhost:3102/auth/login \
@@ -103,6 +121,28 @@ jobs:
           echo
           # Without the cookie, /me must refuse.
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3102/me)" = "401"
+
+      - name: The catalog serves the course it just ingested
+        run: |
+          curl -fsS -b cookies.txt http://localhost:3102/courses | tee /tmp/catalog.json
+          echo
+          # One published course, with all ten sessions counted from the manifest.
+          test "$(jq -r '.courses | length' /tmp/catalog.json)" = "1"
+          test "$(jq -r '.courses[0].slug' /tmp/catalog.json)" = "docker-fundamentals"
+          test "$(jq -r '.courses[0].sessionCount' /tmp/catalog.json)" = "10"
+
+          curl -fsS -b cookies.txt http://localhost:3102/courses/docker-fundamentals > /tmp/detail.json
+          # The outline is read back out of object storage, so this proves the
+          # upload round-tripped rather than merely that rows were written.
+          test "$(jq -r '.outlineMarkdown | length > 100' /tmp/detail.json)" = "true"
+          test "$(jq -r '.sessions | length' /tmp/detail.json)" = "10"
+
+      - name: Enrolling is idempotent and reversible
+        run: |
+          curl -fsS -b cookies.txt -X POST http://localhost:3102/courses/docker-fundamentals/enroll > /tmp/e1.json
+          curl -fsS -b cookies.txt -X POST http://localhost:3102/courses/docker-fundamentals/enroll > /tmp/e2.json
+          test "$(jq -r '.totalSessions' /tmp/e2.json)" = "10"
+          test "$(curl -s -o /dev/null -w '%{http_code}' -b cookies.txt -X DELETE http://localhost:3102/courses/docker-fundamentals/enroll)" = "204"
 
   image:
     runs-on: ubuntu-latest

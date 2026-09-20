@@ -9,8 +9,10 @@ import { SessionGuard } from './auth/guards/session.guard.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { AppConfigModule, AppConfigService } from './config/index.js';
 import { CourseSpecModule } from './course-spec/course-spec.module.js';
+import { CoursesModule } from './courses/courses.module.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/index.js';
+import { StorageModule } from './storage/index.js';
 
 @Module({
   imports: [
@@ -53,8 +55,10 @@ import { PrismaModule } from './prisma/index.js';
     }),
 
     PrismaModule,
+    StorageModule,
     AuthModule,
     CourseSpecModule,
+    CoursesModule,
     HealthModule,
   ],
   providers: [

@@ -6,6 +6,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import fastifyCookie from '@fastify/cookie';
 import fastifyHelmet from '@fastify/helmet';
+import fastifyMultipart from '@fastify/multipart';
 import fastifyRateLimit from '@fastify/rate-limit';
 import { Logger } from 'nestjs-pino';
 
@@ -43,6 +44,12 @@ async function bootstrap(): Promise<void> {
   });
 
   await fastify.register(fastifyCookie);
+
+  // Course package uploads. The per-file cap is enforced again in the route,
+  // because fastify truncates at the limit rather than refusing outright.
+  await fastify.register(fastifyMultipart, {
+    limits: { fileSize: 50 * 1024 * 1024, files: 1, fields: 10 },
+  });
 
   await fastify.register(fastifyRateLimit, {
     max: config.get('RATE_LIMIT_MAX'),
