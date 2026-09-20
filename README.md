@@ -172,9 +172,13 @@ are deliberate choices, not drift:
 
 - **GitHub OAuth** — env vars and the `oauth_accounts` table exist; the routes do
   not yet. Everything is in place to add them without schema changes.
-- **Admin invite endpoint** — `AuthService.createInvite` exists; `POST
-  /admin/invites` lands with the admin module in Phase 1. Until then, create
-  invites from a script or Prisma Studio.
+- **Admin invite endpoint** — `AuthService.createInvite` exists but has no route,
+  and now deliberately will not get one for a while: the owner decided
+  (Overall Plan §8.1, 20 Sep 2026) that there is no learner two yet, so **no
+  multi-user UI gets built** — no invite screens, no admin user list, no
+  per-learner stats. `SIGNUP_MODE=invite_only` stays as the closed front door.
+  Create an invite from a script or Prisma Studio if you ever need one. The
+  schema is ready for the day this reverses.
 - **Login throttle is in-memory**, so it is per-instance. Exact at the Small tier
   (one instance); move it to Redis alongside sessions when a second replica
   appears. See `src/auth/login-throttle.service.ts`.
