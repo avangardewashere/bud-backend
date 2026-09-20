@@ -99,6 +99,10 @@ jobs:
       - run: npm run build
 
       - name: Boot the API and probe it
+        env:
+          # Serve course content too, so the course-serving suite runs rather
+          # than skipping. 3101 here because nothing else is using it in CI.
+          COURSES_PORT: '3101'
         run: |
           node dist/main.js &
           for i in $(seq 1 30); do
@@ -137,12 +141,23 @@ jobs:
           test "$(jq -r '.outlineMarkdown | length > 100' /tmp/detail.json)" = "true"
           test "$(jq -r '.sessions | length' /tmp/detail.json)" = "10"
 
-      - name: Enrolling is idempotent and reversible
+      # The bridge, the storage limits, progress and course serving, over real
+      # HTTP against this Postgres and this MinIO. These endpoints fail in ways
+      # that cost a learner their work rather than showing an error page, which
+      # is why they are exercised end to end and not only in unit tests.
+      #
+      # The suite skips when it cannot reach the API — right on a laptop with
+      # nothing booted, wrong here, where a silent skip looks exactly like a
+      # pass. So assert that a plausible number of assertions actually ran.
+      - name: Player endpoints end to end
+        env:
+          E2E_API_BASE: http://localhost:3102
+          E2E_COURSES_BASE: http://localhost:3101
         run: |
-          curl -fsS -b cookies.txt -X POST http://localhost:3102/courses/docker-fundamentals/enroll > /tmp/e1.json
-          curl -fsS -b cookies.txt -X POST http://localhost:3102/courses/docker-fundamentals/enroll > /tmp/e2.json
-          test "$(jq -r '.totalSessions' /tmp/e2.json)" = "10"
-          test "$(curl -s -o /dev/null -w '%{http_code}' -b cookies.txt -X DELETE http://localhost:3102/courses/docker-fundamentals/enroll)" = "204"
+          npm run test:e2e -- --reporter=default --reporter=json --outputFile=/tmp/e2e.json
+          passed=$(jq -r '.numPassedTests' /tmp/e2e.json)
+          echo "e2e assertions that ran: $passed"
+          test "$passed" -ge 25
 
   image:
     runs-on: ubuntu-latest

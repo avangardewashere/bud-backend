@@ -5,7 +5,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.spec.ts', 'test/**/*.e2e-spec.ts'],
+    // Unit tests only. The e2e suite has different preconditions — it needs a
+    // booted API, a database and object storage — and lives in
+    // vitest.e2e.config.ts. Running them from here picked them up without their
+    // environment and failed for reasons that said nothing about the code.
+    include: ['src/**/*.spec.ts'],
     // argon2 is deliberately slow; the default 5s is tight for hashing tests.
     testTimeout: 20_000,
     coverage: {
