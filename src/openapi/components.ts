@@ -1,0 +1,42 @@
+import type { ReferenceObject, SchemaObject } from '@nestjs/swagger';
+
+import {
+  changePasswordResultSchema,
+  errorSchema,
+  publicUserSchema,
+} from '../auth/dto/auth.schemas.js';
+import { openApiSchema } from '../common/validation/zod.pipe.js';
+
+/**
+ * Named schema components for the published OpenAPI document.
+ *
+ * Without these every response inlines its shape, and a generated client ends
+ * up with the same structural object emitted separately under `login`,
+ * `register` and `/me` — three anonymous types for one concept. Registering
+ * them here gives the shell a real `PublicUser` type to import.
+ *
+ * Add a schema here the moment it is used by more than one route.
+ */
+
+/** A `$ref` at a named component. */
+export const ref = (name: keyof typeof componentSchemas): ReferenceObject => ({
+  $ref: `#/components/schemas/${name}`,
+});
+
+export const componentSchemas = {
+  PublicUser: openApiSchema(publicUserSchema, 'output'),
+
+  /** Every endpoint that returns a user returns it wrapped, so name the wrapper too. */
+  UserEnvelope: {
+    type: 'object',
+    required: ['user'],
+    properties: { user: { $ref: '#/components/schemas/PublicUser' } },
+  } satisfies SchemaObject,
+
+  ChangePasswordResult: openApiSchema(changePasswordResultSchema, 'output'),
+
+  /** The one error shape the whole API uses. */
+  ErrorResponse: openApiSchema(errorSchema, 'output'),
+} satisfies Record<string, SchemaObject>;
+
+export type ComponentName = keyof typeof componentSchemas;

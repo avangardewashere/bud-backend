@@ -11,6 +11,7 @@ import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module.js';
 import { AppConfigService } from './config/index.js';
+import { componentSchemas } from './openapi/components.js';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -77,6 +78,15 @@ async function bootstrap(): Promise<void> {
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
+
+    // The routes reference these by $ref; register the definitions so the shell's
+    // generated client gets named types (PublicUser, ErrorResponse) rather than
+    // an anonymous structural copy per endpoint.
+    document.components ??= {};
+    document.components.schemas = {
+      ...document.components.schemas,
+      ...componentSchemas,
+    };
     SwaggerModule.setup('docs', app, document, {
       jsonDocumentUrl: 'docs/openapi.json',
     });

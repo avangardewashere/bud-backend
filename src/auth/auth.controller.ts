@@ -26,17 +26,15 @@ import {
 import type { FastifyReply } from 'fastify';
 
 import { openApiSchema, zodBody } from '../common/validation/zod.pipe.js';
+import { ref } from '../openapi/components.js';
 import { AuthService } from './auth.service.js';
 import type { AuthenticatedRequest, PublicUser, RequestUser } from './auth.types.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
 import {
-  changePasswordResultSchema,
   changePasswordSchema,
-  errorSchema,
   loginSchema,
   registerSchema,
-  userEnvelopeSchema,
   type ChangePasswordInput,
   type LoginInput,
   type RegisterInput,
@@ -65,15 +63,15 @@ export class AuthController {
   @ApiBody({ schema: openApiSchema(registerSchema) })
   @ApiCreatedResponse({
     description: 'Account created and signed in; the session cookie is set.',
-    schema: openApiSchema(userEnvelopeSchema, 'output'),
+    schema: ref('UserEnvelope'),
   })
   @ApiForbiddenResponse({
     description: 'Signup closed, or the invite is invalid/expired.',
-    schema: openApiSchema(errorSchema, 'output'),
+    schema: ref('ErrorResponse'),
   })
   @ApiConflictResponse({
     description: 'That email address is already registered.',
-    schema: openApiSchema(errorSchema, 'output'),
+    schema: ref('ErrorResponse'),
   })
   async register(
     @Body(zodBody(registerSchema)) input: RegisterInput,
@@ -93,15 +91,15 @@ export class AuthController {
   @ApiBody({ schema: openApiSchema(loginSchema) })
   @ApiOkResponse({
     description: 'Signed in; the session cookie is set.',
-    schema: openApiSchema(userEnvelopeSchema, 'output'),
+    schema: ref('UserEnvelope'),
   })
   @ApiUnauthorizedResponse({
     description: 'Invalid email or password.',
-    schema: openApiSchema(errorSchema, 'output'),
+    schema: ref('ErrorResponse'),
   })
   @ApiTooManyRequestsResponse({
     description: 'Too many failed attempts; try again later. See Retry-After.',
-    schema: openApiSchema(errorSchema, 'output'),
+    schema: ref('ErrorResponse'),
   })
   async login(
     @Body(zodBody(loginSchema)) input: LoginInput,
@@ -163,11 +161,11 @@ export class AuthController {
   @ApiBody({ schema: openApiSchema(changePasswordSchema) })
   @ApiOkResponse({
     description: 'Password changed; every other session was signed out.',
-    schema: openApiSchema(changePasswordResultSchema, 'output'),
+    schema: ref('ChangePasswordResult'),
   })
   @ApiUnauthorizedResponse({
     description: 'Current password is incorrect.',
-    schema: openApiSchema(errorSchema, 'output'),
+    schema: ref('ErrorResponse'),
   })
   async changePassword(
     @Body(zodBody(changePasswordSchema)) input: ChangePasswordInput,
@@ -205,11 +203,11 @@ export class MeController {
   @ApiOperation({ summary: 'The signed-in user' })
   @ApiOkResponse({
     description: 'The current user.',
-    schema: openApiSchema(userEnvelopeSchema, 'output'),
+    schema: ref('UserEnvelope'),
   })
   @ApiUnauthorizedResponse({
     description: 'No valid session.',
-    schema: openApiSchema(errorSchema, 'output'),
+    schema: ref('ErrorResponse'),
   })
   async me(@CurrentUser() user: RequestUser): Promise<{ user: PublicUser }> {
     // Re-read rather than echoing the guard's slice: /me must return the same
