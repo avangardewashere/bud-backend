@@ -1,0 +1,83 @@
+# Bud — reverse proxy and TLS for the VPS tier.
+#
+# Three hostnames, because the separation between them is the product's security
+# boundary and not a deployment detail:
+#
+#   app.{$BUD_DOMAIN}      the Next.js shell (deployed separately; proxied here
+#                          only if you run it on this box rather than Vercel)
+#   api.{$BUD_DOMAIN}      this API
+#   courses.{$BUD_DOMAIN}  course content, author-controlled and untrusted
+#
+# courses. MUST stay a different host from app. A different port is not a
+# different origin as far as cookies are concerned, so putting course content on
+# a path or a port of app. would hand every course's JavaScript the session
+# cookie. Everything else here is convenience; that part is not.
+
+{
+	email {$CADDY_ACME_EMAIL}
+	# Caddy obtains and renews certificates automatically. Nothing below needs
+	# to know about TLS.
+}
+
+api.{$BUD_DOMAIN} {
+	reverse_proxy api:3102 {
+		# The API trusts X-Forwarded-For for rate limiting and for the IP it
+		# records against a session, so it has to arrive correctly.
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	encode zstd gzip
+
+	# The API sets its own security headers via helmet; these are the ones that
+	# belong to the edge rather than the app.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+courses.{$BUD_DOMAIN} {
+	reverse_proxy api:3101
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# Deliberately no header overrides here: the course listener sets the
+	# Content-Security-Policy per response, and that policy is the sandbox. An
+	# edge rule that replaced or merged it would silently weaken the isolation
+	# the whole design rests on.
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Only needed when the shell runs on this box instead of Vercel. Harmless to
+# leave in place: Caddy will not obtain a certificate for a name that does not
+# resolve here, and the site simply never serves.
+app.{$BUD_DOMAIN} {
+	reverse_proxy {$BUD_WEB_UPSTREAM:web:3000}
+
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

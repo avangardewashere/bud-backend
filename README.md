@@ -168,6 +168,71 @@ are deliberate choices, not drift:
 
 ---
 
+## Deploying
+
+Everything below is written and verified except the parts that need your
+accounts. The production image has been built and booted in `NODE_ENV=production`
+against a real Postgres and a real MinIO; what has *not* happened is a push to a
+remote, so **CI has never actually executed**.
+
+### What only you can do
+
+1. **Create the repositories and push.** Neither repo has a git remote, so
+   `ci.yml` has never run. This is the single largest untested thing in the
+   project — the pipeline meant to protect it is itself unproven.
+2. **A VPS** (Hetzner CX22 class is plenty) with Docker installed, and DNS for
+   `api.`, `courses.` and `app.` pointing at it.
+3. **Object storage** — a Cloudflare R2 bucket and an access key.
+4. **Repository secrets** for `deploy.yml`: `DEPLOY_HOST`, `DEPLOY_USER`,
+   `DEPLOY_SSH_KEY`, `DEPLOY_PATH`, and a `BUD_DOMAIN` variable.
+
+### What is already done
+
+```bash
+# On the server, once:
+mkdir -p /srv/bud && cd /srv/bud
+# copy compose.prod.yaml, infra/ and .env.prod.example from this repo
+cp .env.prod.example .env    # then fill it in
+
+docker compose -f compose.prod.yaml pull
+docker compose -f compose.prod.yaml run --rm migrate
+docker compose -f compose.prod.yaml up -d
+```
+
+After that, `deploy.yml` does it on every green build of `main`, and a rollback
+is a manual dispatch with an older `sha-` tag.
+
+| File | What it is |
+|---|---|
+| `compose.prod.yaml` | api + postgres + caddy. Postgres has **no published ports** — it is reachable only on the compose network |
+| `infra/caddy/Caddyfile` | TLS and the three hostnames |
+| `infra/backup.sh` | Nightly `pg_dump` to object storage, with pruning. Put it in cron |
+| `.github/workflows/deploy.yml` | Pull, migrate, restart, wait for readiness, smoke-test through TLS |
+
+### Things that are deliberate
+
+- **Migrations are a separate one-shot container**, run before the new image
+  serves. A container that migrates as it boots runs the migration once per
+  replica, and a failed migration leaves a half-serving app instead of an old
+  one that still works.
+- **`/health` never checks the database.** If a dead database failed liveness,
+  the orchestrator would restart the container — which fixes nothing and turns
+  an outage into a crash loop.
+- **`/ready` fails only on the database.** Object storage is reported but not
+  fatal: without it course *content* cannot be served, while sign-in, the
+  catalog, progress and the bridge all still work. It returns
+  `{"status":"degraded"}` so monitoring sees it without the instance leaving
+  rotation. Verified by pointing `S3_ENDPOINT` at nothing.
+- **The API refuses to start misconfigured.** Verified in the production image:
+  `COOKIE_SECURE=false` with `NODE_ENV=production` exits with
+  `COOKIE_SECURE must be true in production` rather than serving insecure cookies.
+- **`courses.` is a separate hostname, not a path or a port.** Cookies ignore
+  ports, so serving course content anywhere under `app.` would hand
+  author-controlled JavaScript the session cookie. Caddy deliberately does not
+  touch the CSP those responses carry.
+
+---
+
 ## Known gaps (intentional for Phase 0)
 
 - **GitHub OAuth** — env vars and the `oauth_accounts` table exist; the routes do

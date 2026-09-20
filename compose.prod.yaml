@@ -1,0 +1,147 @@
+# Bud API — the VPS deployment (Tech-Information.md §10, "Medium" tier).
+#
+#   docker compose -f compose.prod.yaml pull
+#   docker compose -f compose.prod.yaml run --rm migrate
+#   docker compose -f compose.prod.yaml up -d
+#
+# Migrations are a separate one-shot container, run *before* the new image
+# starts serving. Never auto-migrate on boot: a container that migrates as it
+# starts will run the migration once per replica, and a failed migration leaves
+# you with a half-serving app instead of an old one that still works.
+#
+# Everything is configured by environment. Copy .env.prod.example to .env on the
+# server; nothing secret is in this file or in the image.
+
+name: bud
+
+services:
+  api:
+    image: ${BUD_API_IMAGE:-ghcr.io/OWNER/bud-api:latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '3102'
+      HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+
+      APP_ORIGIN: https://app.${BUD_DOMAIN}
+      COURSES_ORIGIN: https://courses.${BUD_DOMAIN}
+      API_ORIGIN: https://api.${BUD_DOMAIN}
+      # Serve course content from this process, on its own port, proxied by
+      # Caddy at courses.${BUD_DOMAIN}. The hostname is what isolates it.
+      COURSES_PORT: '3101'
+
+      DATABASE_URL: ${DATABASE_URL}
+
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-bud_session}
+      SESSION_ABSOLUTE_TTL_DAYS: ${SESSION_ABSOLUTE_TTL_DAYS:-30}
+      SESSION_IDLE_TTL_HOURS: ${SESSION_IDLE_TTL_HOURS:-336}
+      # Shared by app. and api., so the cookie must be set on the parent domain.
+      COOKIE_DOMAIN: .${BUD_DOMAIN}
+      COOKIE_SECURE: 'true'
+
+      SIGNUP_MODE: ${SIGNUP_MODE:-invite_only}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      # R2 and S3 use virtual-hosted addressing; only MinIO needs path style.
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+
+      SMTP_HOST: ${SMTP_HOST:-localhost}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-Bud <no-reply@bud.local>}
+
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-2000}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Liveness only. A dead database must not make the container restart —
+      # restarting it fixes nothing and turns a recoverable outage into a
+      # crash loop.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3102/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # Give in-flight requests time to finish on deploy.
+    stop_grace_period: 30s
+
+  # One-shot. `run --rm migrate` before `up -d`, never as part of the app.
+  migrate:
+    image: ${BUD_API_IMAGE:-ghcr.io/OWNER/bud-api:latest}
+    profiles: ['tools']
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL}
+      # The entrypoint validates the full environment on boot, and migrate runs
+      # the same image, so it needs enough to satisfy that.
+      APP_ORIGIN: https://app.${BUD_DOMAIN}
+      COURSES_ORIGIN: https://courses.${BUD_DOMAIN}
+      API_ORIGIN: https://api.${BUD_DOMAIN}
+      COOKIE_SECURE: 'true'
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  postgres:
+    image: postgres:${POSTGRES_TAG:-17-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-bud}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # Deliberately no ports: Postgres is reachable only from the compose
+    # network. Exposing 5432 on a public VPS is how databases get found.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-bud} -d ${POSTGRES_DB:-bud}']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      BUD_DOMAIN: ${BUD_DOMAIN}
+      CADDY_ACME_EMAIL: ${CADDY_ACME_EMAIL}
+      BUD_WEB_UPSTREAM: ${BUD_WEB_UPSTREAM:-web:3000}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live in a volume: losing them means re-issuing on every
+      # deploy, and Let's Encrypt rate-limits that.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:

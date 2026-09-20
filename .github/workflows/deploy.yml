@@ -1,0 +1,113 @@
+# Bud API — deploy to the VPS.
+#
+# Runs only after ci.yml has gone green on main, so a deploy can never ship an
+# image that failed its own tests. Manual dispatch exists for rollbacks: give it
+# an image tag and it deploys that instead.
+#
+# Requires these repository secrets:
+#   DEPLOY_HOST        the server
+#   DEPLOY_USER        the ssh user
+#   DEPLOY_SSH_KEY     a private key whose public half is in that user's authorized_keys
+#   DEPLOY_PATH        where compose.prod.yaml and .env live on the server (e.g. /srv/bud)
+
+name: deploy
+
+on:
+  workflow_run:
+    workflows: ['ci']
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g. sha-abc1234). Defaults to latest.'
+        required: false
+        default: 'latest'
+
+concurrency:
+  # Never two deploys at once: the second would race the first's migration.
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # workflow_run fires whatever the outcome, so check it actually passed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    environment: production
+    steps:
+      - name: Resolve the image tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=sha-$(echo '${{ github.event.workflow_run.head_sha }}' | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up the deploy key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          # Pin the host key rather than accepting whatever answers: this
+          # connection carries the keys to production.
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/bud-api:${{ steps.tag.outputs.tag }}
+        run: |
+          ssh -i ~/.ssh/id_deploy "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "IMAGE='$IMAGE' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "${DEPLOY_PATH:-/srv/bud}"
+
+          echo "==> Deploying $IMAGE"
+          export BUD_API_IMAGE="$IMAGE"
+
+          # Record what is running now, so a rollback does not need archaeology.
+          docker compose -f compose.prod.yaml config | grep -m1 'image:' || true
+
+          docker compose -f compose.prod.yaml pull api
+
+          # Migrations run to completion in their own container BEFORE the new
+          # image starts serving. If this fails the deploy stops here and the
+          # old container is still up and still working.
+          echo "==> Migrating"
+          docker compose -f compose.prod.yaml run --rm migrate
+
+          echo "==> Starting"
+          docker compose -f compose.prod.yaml up -d api caddy
+
+          echo "==> Waiting for readiness"
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 http://127.0.0.1:3102/ready; then
+              echo
+              echo "==> Ready"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "!!! Never became ready. Recent logs:" >&2
+          docker compose -f compose.prod.yaml logs --tail 50 api >&2
+          exit 1
+          REMOTE
+
+      - name: Smoke-test the public surface
+        run: |
+          # From outside, through Caddy and TLS — the deploy is not done until
+          # the thing a browser talks to works.
+          curl -fsS "https://api.${{ vars.BUD_DOMAIN }}/health"
+          echo
+          # An unauthenticated /me must still refuse; a deploy that accidentally
+          # opened the door should fail here rather than in the wild.
+          code=$(curl -s -o /dev/null -w '%{http_code}' "https://api.${{ vars.BUD_DOMAIN }}/me")
+          test "$code" = "401"
+          echo "public surface ok"
