@@ -12,6 +12,7 @@ import { CourseSpecModule } from './course-spec/course-spec.module.js';
 import { CoursesModule } from './courses/courses.module.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/index.js';
+import { ProgressModule } from './progress/progress.module.js';
 import { StorageModule } from './storage/index.js';
 
 @Module({
@@ -59,6 +60,7 @@ import { StorageModule } from './storage/index.js';
     AuthModule,
     CourseSpecModule,
     CoursesModule,
+    ProgressModule,
     HealthModule,
   ],
   providers: [

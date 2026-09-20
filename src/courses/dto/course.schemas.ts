@@ -123,3 +123,14 @@ export type CourseSummary = z.infer<typeof courseSummarySchema>;
 export type CourseDetail = z.infer<typeof courseDetailSchema>;
 export type UpdateCourseInput = z.infer<typeof updateCourseSchema>;
 export type ListQuery = z.infer<typeof listQuerySchema>;
+
+/** Manifest-declared keys against the ones learners actually write. */
+export const courseStorageKeysSchema = z.object({
+  slug: z.string(),
+  version: z.string().nullable(),
+  declared: z.array(z.string()),
+  /** Written by the course but not declared — usually a typo in the course. */
+  undeclared: z.array(z.object({ key: z.string(), learners: z.int().nonnegative() })),
+  /** Declared but never written. Harmless, often a leftover. */
+  unused: z.array(z.string()),
+});

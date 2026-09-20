@@ -10,7 +10,7 @@ import {
 import { Injectable, Logger } from '@nestjs/common';
 import type { Buffer } from 'node:buffer';
 
-import { AppConfigService } from '../config/index.js';
+import { AppConfigService } from '../config/app-config.service.js';
 
 /**
  * Object storage for course packages. S3-compatible on purpose: MinIO locally,
@@ -74,6 +74,19 @@ export class StorageService {
     }
 
     return response.Body.transformToString('utf-8');
+  }
+
+  /** Reads a stored binary file — images and fonts inside a course package. */
+  async getBytes(key: string): Promise<Uint8Array> {
+    const response = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+
+    if (!response.Body) {
+      throw new Error(`No body for ${key}`);
+    }
+
+    return response.Body.transformToByteArray();
   }
 
   async list(prefix: string): Promise<string[]> {
@@ -148,28 +161,4 @@ export class StorageService {
   }
 }
 
-/**
- * Content types for the extensions the course spec allows. Course HTML is
- * served to a browser, so guessing wrong here is a rendering bug at best and a
- * sniffing problem at worst.
- */
-const CONTENT_TYPES: Record<string, string> = {
-  html: 'text/html; charset=utf-8',
-  htm: 'text/html; charset=utf-8',
-  css: 'text/css; charset=utf-8',
-  js: 'text/javascript; charset=utf-8',
-  json: 'application/json; charset=utf-8',
-  md: 'text/markdown; charset=utf-8',
-  txt: 'text/plain; charset=utf-8',
-  svg: 'image/svg+xml',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  woff2: 'font/woff2',
-};
-
-export function contentTypeFor(path: string): string {
-  const ext = path.includes('.') ? path.split('.').pop()!.toLowerCase() : '';
-  return CONTENT_TYPES[ext] ?? 'application/octet-stream';
-}
+export { contentTypeFor } from './content-types.js';

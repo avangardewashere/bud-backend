@@ -9,9 +9,18 @@ import {
 import { Prisma } from '@prisma/client';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
+import { defaultCodeForStatus } from '../errors/app-exception.js';
+
 interface ErrorBody {
   statusCode: number;
   error: string;
+  /**
+   * Stable machine-readable identifier, present on every error so the shell can
+   * branch on it instead of matching on `message`. Values come from `ErrorCode`;
+   * typed as string because a thrown payload could carry anything and this
+   * filter is the last line of defence, not a place to throw again.
+   */
+  code: string;
   message: string;
   /** Field-level detail from the Zod pipe, when present. */
   errors?: unknown;
@@ -56,19 +65,29 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return {
           statusCode,
           error: exception.name,
+          code: defaultCodeForStatus(statusCode),
           message: response,
           path,
           timestamp,
         };
       }
 
-      const payload = response as { message?: unknown; error?: unknown; errors?: unknown };
+      const payload = response as {
+        message?: unknown;
+        error?: unknown;
+        errors?: unknown;
+        code?: unknown;
+        detail?: unknown;
+      };
 
       return {
         statusCode,
         error: typeof payload.error === 'string' ? payload.error : exception.name,
+        // An explicit code wins; otherwise derive one so the field is never absent.
+        code: typeof payload.code === 'string' ? payload.code : defaultCodeForStatus(statusCode),
         message: AllExceptionsFilter.messageOf(payload.message, exception.message),
         ...(payload.errors ? { errors: payload.errors } : {}),
+        ...(typeof payload.detail === 'string' ? { detail: payload.detail } : {}),
         path,
         timestamp,
       };
@@ -81,6 +100,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
     return {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       error: 'InternalServerError',
+      code: 'internal_error',
       message: 'Something went wrong.',
       path,
       timestamp,
@@ -113,6 +133,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return {
           statusCode: HttpStatus.CONFLICT,
           error: 'Conflict',
+          code: 'conflict',
           message: 'That record already exists.',
           path,
           timestamp,
@@ -121,6 +142,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return {
           statusCode: HttpStatus.NOT_FOUND,
           error: 'NotFound',
+          code: 'not_found',
           message: 'Not found.',
           path,
           timestamp,
@@ -129,6 +151,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return {
           statusCode: HttpStatus.BAD_REQUEST,
           error: 'BadRequest',
+          code: 'validation_failed',
           message: 'Referenced record does not exist.',
           path,
           timestamp,
@@ -137,6 +160,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
         return {
           statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
           error: 'InternalServerError',
+          code: 'internal_error',
           message: 'Something went wrong.',
           path,
           timestamp,

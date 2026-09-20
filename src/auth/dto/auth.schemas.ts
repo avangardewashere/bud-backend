@@ -74,7 +74,14 @@ export const changePasswordResultSchema = z.object({
 export const errorSchema = z.object({
   statusCode: z.int(),
   error: z.string(),
+  /**
+   * Stable machine-readable identifier, present on every error. Branch on this,
+   * never on `message` — messages are free to be reworded, codes are not.
+   */
+  code: z.string(),
   message: z.string(),
+  /** Extra context for one error; newline-separated when it has several lines. */
+  detail: z.string().optional(),
   errors: z.array(z.object({ path: z.string(), message: z.string(), code: z.string() })).optional(),
   path: z.string(),
   timestamp: z.iso.datetime(),

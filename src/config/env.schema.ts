@@ -38,6 +38,14 @@ export const envSchema = z
     APP_ORIGIN: z.url(),
     COURSES_ORIGIN: z.url(),
     API_ORIGIN: z.url(),
+    /**
+     * Port for the course-content listener. Course files must be served from a
+     * different *host* to the shell, not merely a different port, because
+     * cookies ignore ports — so this is a second listener rather than a route
+     * on the API. Leave unset to not serve courses from this process at all,
+     * which is what you want in development while the shell runs its own.
+     */
+    COURSES_PORT: z.coerce.number().int().min(1).max(65535).optional(),
 
     // database
     DATABASE_URL: z.string().min(1),
@@ -70,7 +78,7 @@ export const envSchema = z
     SMTP_FROM: z.string().min(1).default('Bud <no-reply@bud.local>'),
 
     // rate limiting
-    RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
+    RATE_LIMIT_MAX: z.coerce.number().int().positive().default(2000),
     RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 
     // errors

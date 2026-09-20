@@ -145,6 +145,48 @@ export class AdminCoursesController {
     };
   }
 
+  @Get(':id/storage-keys')
+  @ApiOperation({
+    summary: 'Storage keys learners actually use, against what the manifest declares',
+    description:
+      'Undeclared keys are accepted at write time — rejecting would punish the ' +
+      'learner for the author’s mistake — so drift surfaces here instead, in the ' +
+      'author’s workflow, where it can be fixed without interrupting anybody.',
+  })
+  @ApiOkResponse({ description: 'Declared and observed keys.', schema: ref('CourseStorageKeys') })
+  async storageKeys(@Param('id') id: string) {
+    const course = await this.prisma.course.findFirst({
+      where: { id, deletedAt: null },
+      include: { currentVersion: true },
+    });
+
+    if (!course) {
+      throw new NotFoundException('No such course.');
+    }
+
+    const manifest = (course.currentVersion?.manifest ?? {}) as { storageKeys?: string[] };
+    const declared = manifest.storageKeys ?? [];
+
+    const observed = await this.prisma.courseState.groupBy({
+      by: ['key'],
+      where: { courseId: course.id },
+      _count: { _all: true },
+    });
+
+    const used = observed.map((row) => ({ key: row.key, learners: row._count._all }));
+    const declaredSet = new Set(declared);
+
+    return {
+      slug: course.slug,
+      version: course.currentVersion?.version ?? null,
+      declared,
+      /** Written by the course but absent from the manifest — usually a typo. */
+      undeclared: used.filter((k) => !declaredSet.has(k.key)),
+      /** Declared but never written. Harmless, but often a leftover. */
+      unused: declared.filter((key) => !used.some((k) => k.key === key)),
+    };
+  }
+
   @Patch(':id')
   @ApiOperation({
     summary: 'Publish, unpublish, archive, or point at a different version',

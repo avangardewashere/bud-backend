@@ -12,10 +12,17 @@ import {
   courseDetailSchema,
   courseListSchema,
   courseSessionSchema,
+  courseStorageKeysSchema,
   courseSummarySchema,
   ingestResultSchema,
   progressSummarySchema,
 } from '../courses/dto/course.schemas.js';
+import {
+  dashboardSchema,
+  sessionProgressListSchema,
+  sessionProgressSchema,
+  stateValueSchema,
+} from '../progress/dto/progress.schemas.js';
 import { openApiSchema } from '../common/validation/zod.pipe.js';
 
 /**
@@ -62,6 +69,14 @@ export const componentSchemas = {
   /** One line of the validation checklist the admin panel renders. */
   ValidationResult: openApiSchema(validationResultSchema, 'output'),
   IngestResult: openApiSchema(ingestResultSchema, 'output'),
+  CourseStorageKeys: openApiSchema(courseStorageKeysSchema, 'output'),
+
+  // ── the player ────────────────────────────────────────────────────────────
+  /** What storage.get returns; `value` is opaque to the platform. */
+  StateValue: openApiSchema(stateValueSchema, 'output'),
+  SessionProgress: openApiSchema(sessionProgressSchema, 'output'),
+  SessionProgressList: openApiSchema(sessionProgressListSchema, 'output'),
+  Dashboard: openApiSchema(dashboardSchema, 'output'),
 } satisfies Record<string, SchemaObject>;
 
 export type ComponentName = keyof typeof componentSchemas;
