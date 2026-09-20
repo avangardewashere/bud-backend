@@ -1,0 +1,162 @@
+# Bud API — CI
+#
+# checks  typecheck, lint, format, unit tests
+# e2e     migrations applied to a real Postgres, then the API boots against it
+# image   builds the production image; pushes to GHCR on main only
+#
+# Mirrors Tech-Information.md section 9 for the API half.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: checks
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: bud
+          POSTGRES_PASSWORD: bud
+          POSTGRES_DB: bud
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U bud -d bud"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://bud:bud@localhost:5432/bud?schema=public
+      APP_ORIGIN: http://localhost:3100
+      COURSES_ORIGIN: http://127.0.0.1:3101
+      API_ORIGIN: http://localhost:3102
+      S3_ENDPOINT: http://localhost:9000
+      S3_BUCKET: bud-courses
+      S3_ACCESS_KEY_ID: ci
+      S3_SECRET_ACCESS_KEY: ci
+      SEED_ADMIN_PASSWORD: ci-admin-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+
+      # Migrations are code and run as their own step — exactly as in deploy.
+      - run: npx prisma migrate deploy
+      - run: npm run db:seed
+      - run: npm run build
+
+      - name: Boot the API and probe it
+        run: |
+          node dist/main.js &
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3102/ready; then echo; break; fi
+            sleep 1
+          done
+          curl -fsS http://localhost:3102/ready
+
+      - name: Sign in as the seeded admin
+        run: |
+          curl -fsS -c cookies.txt -X POST http://localhost:3102/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"admin@bud.local","password":"ci-admin-password"}'
+          echo
+          curl -fsS -b cookies.txt http://localhost:3102/me
+          echo
+          # Without the cookie, /me must refuse.
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3102/me)" = "401"
+
+  image:
+    runs-on: ubuntu-latest
+    needs: [checks, e2e]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/bud-api
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      # Build once into the local daemon so it can be scanned on every run,
+      # including PRs where nothing is pushed.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          tags: bud-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: bud-api:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # Visible, not blocking, until the baseline is clean.
+          exit-code: '0'
+
+      # Same build, fully cached, now pushed with the real tags.
+      - uses: docker/build-push-action@v6
+        if: github.ref == 'refs/heads/main'
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha

@@ -1,0 +1,132 @@
+# Bud API — local development stack.
+#
+#   docker compose up -d        bring everything up
+#   docker compose logs -f api  follow the API
+#   docker compose down -v      stop and delete the data volumes
+#
+# The frontend shell is a separate project and is not started here. It talks to
+# this API over http://localhost:3102 with credentials, which is why
+# APP_ORIGIN below must match wherever the shell runs.
+
+# Explicit, because the folder name contains spaces and would make an awkward
+# default project name.
+name: bud
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    restart: unless-stopped
+    ports:
+      - '3102:3102'
+      - '9229:9229' # node inspector
+    environment:
+      NODE_ENV: development
+      PORT: '3102'
+      HOST: 0.0.0.0
+      LOG_LEVEL: debug
+      APP_ORIGIN: http://localhost:3100
+      COURSES_ORIGIN: http://127.0.0.1:3101
+      API_ORIGIN: http://localhost:3102
+      DATABASE_URL: postgresql://bud:bud@postgres:5432/bud?schema=public
+      SESSION_COOKIE_NAME: bud_session
+      COOKIE_SECURE: 'false'
+      SIGNUP_MODE: invite_only
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: bud-courses
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: 'true'
+      SMTP_HOST: mailpit
+      SMTP_PORT: '1025'
+      SEED_ADMIN_EMAIL: admin@bud.local
+      SEED_ADMIN_PASSWORD: bud-dev-admin-pw
+    volumes:
+      # Bind-mount the source for hot reload, but keep the container's own
+      # node_modules: the host tree is built for Windows, the container is Alpine.
+      - ./src:/app/src
+      - ./prisma:/app/prisma
+      - ./tsconfig.json:/app/tsconfig.json
+      - ./tsconfig.build.json:/app/tsconfig.build.json
+      - ./nest-cli.json:/app/nest-cli.json
+      - ./package.json:/app/package.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  postgres:
+    # Planning/Tech-Information.md says Postgres 16; this pins 17 because it is
+    # what was pullable on the build machine and nothing in the schema is
+    # version-specific. Override with POSTGRES_TAG if you want to match exactly.
+    image: postgres:${POSTGRES_TAG:-17-alpine}
+    restart: unless-stopped
+    ports:
+      # Host port 5434, not 5432: other Postgres instances commonly own 5432/5433
+      # on dev machines, and then "localhost:543x" silently reaches the
+      # wrong server. Inside the compose network it is still postgres:5432.
+      - '${POSTGRES_PORT:-5434}:5432'
+    environment:
+      POSTGRES_USER: bud
+      POSTGRES_PASSWORD: bud
+      POSTGRES_DB: bud
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` alone returns true before the init scripts finish; the -d
+      # flag makes it wait for the actual database.
+      test: ['CMD-SHELL', 'pg_isready -U bud -d bud']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # S3-compatible storage for course packages. Console at http://localhost:9001
+  minio:
+    image: minio/minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  # Creates the course bucket once, then exits. Without this the first upload
+  # fails against an empty MinIO.
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/bud-courses &&
+      echo 'bucket ready'
+      "
+    restart: 'no'
+
+  # Catches invite and notification email. UI at http://localhost:8025
+  mailpit:
+    image: ${MAILPIT_IMAGE:-axllent/mailpit}
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+
+volumes:
+  postgres-data:
+  minio-data:

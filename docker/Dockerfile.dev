@@ -1,0 +1,21 @@
+# Bud API — development image.
+#
+# Source is bind-mounted by compose, so this image only needs the dependency
+# tree and the toolchain. Rebuild it when package.json changes, not when code does.
+
+FROM node:22-alpine
+WORKDIR /app
+
+RUN apk add --no-cache tini
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY prisma ./prisma
+COPY prisma.config.ts ./
+RUN npx prisma generate
+
+EXPOSE 3102 9229
+
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["npm", "run", "start:dev"]

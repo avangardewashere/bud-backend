@@ -1,0 +1,281 @@
+// Bud — data model v1
+// Mirrors Planning/Tech-Information.md section 5.
+//
+// Conventions that keep scaling cheap later:
+//   - UUIDv7 primary keys: time-ordered, index-friendly, safe to generate anywhere.
+//   - Every row has createdAt; user-facing rows have updatedAt; deletable rows have deletedAt.
+//   - Progress is keyed by courseId + manifest session key, NEVER by courseVersionId,
+//     so re-uploading a course version does not wipe progress.
+//   - progressEvents is written from day one even though nothing reads it yet.
+//     Behaviour data cannot be backfilled.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────── identity ───────────────────────────────
+
+enum Role {
+  learner
+  admin
+
+  @@map("role")
+}
+
+model User {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  /// Always stored lower-cased and trimmed (normalised in the auth service),
+  /// so a plain unique index is enough and no citext extension is needed.
+  email        String    @unique
+  name         String
+  avatarUrl    String?   @map("avatar_url")
+  /// Null for accounts that only ever sign in through OAuth.
+  passwordHash String?   @map("password_hash")
+  role         Role      @default(learner)
+  /// IANA zone. Decides the day boundary for streaks (Phase 2).
+  timezone     String    @default("UTC")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  lastSeenAt   DateTime? @map("last_seen_at") @db.Timestamptz(3)
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  sessions        AuthSession[]
+  oauthAccounts   OAuthAccount[]
+  invitesSent     Invite[]          @relation("InviteInvitedBy")
+  inviteUsed      Invite?           @relation("InviteAcceptedBy")
+  coursesCreated  Course[]          @relation("CourseCreatedBy")
+  enrollments     Enrollment[]
+  courseState     CourseState[]
+  sessionProgress SessionProgress[]
+  progressEvents  ProgressEvent[]
+
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model AuthSession {
+  /// SHA-256 of the 256-bit random session id. The raw id only ever lives in the
+  /// cookie, so a database leak does not hand out live sessions.
+  id            String    @id
+  userId        String    @map("user_id") @db.Uuid
+  /// Absolute expiry. Never extended.
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
+  /// Idle expiry. Slides forward on use.
+  idleExpiresAt DateTime  @map("idle_expires_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt    DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(3)
+  userAgent     String?   @map("user_agent")
+  ip            String?
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("auth_sessions")
+}
+
+model OAuthAccount {
+  provider          String
+  providerAccountId String   @map("provider_account_id")
+  userId            String   @map("user_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_accounts")
+}
+
+model Invite {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  email        String
+  /// SHA-256 of the token that goes in the invite link.
+  tokenHash    String    @unique @map("token_hash")
+  invitedById  String    @map("invited_by") @db.Uuid
+  role         Role      @default(learner)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+  acceptedAt   DateTime? @map("accepted_at") @db.Timestamptz(3)
+  acceptedById String?   @unique @map("accepted_by") @db.Uuid
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  invitedBy  User  @relation("InviteInvitedBy", fields: [invitedById], references: [id])
+  acceptedBy User? @relation("InviteAcceptedBy", fields: [acceptedById], references: [id])
+
+  @@index([email])
+  @@map("invites")
+}
+
+// ─────────────────────────────── content ────────────────────────────────
+
+enum CourseStatus {
+  draft
+  published
+  archived
+
+  @@map("course_status")
+}
+
+model Course {
+  id               String       @id @default(uuid(7)) @db.Uuid
+  /// Stable identifier from the manifest (id field), also the URL slug.
+  slug             String       @unique
+  title            String
+  summary          String
+  level            String?
+  estimatedHours   Int?         @map("estimated_hours")
+  tags             String[]     @default([])
+  status           CourseStatus @default(draft)
+  /// Accent colour from the manifest theme, surfaced in the shell chrome.
+  accentColor      String?      @map("accent_color")
+  coverKey         String?      @map("cover_key")
+  currentVersionId String?      @unique @map("current_version_id") @db.Uuid
+  createdById      String       @map("created_by") @db.Uuid
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt        DateTime?    @map("deleted_at") @db.Timestamptz(3)
+
+  createdBy       User              @relation("CourseCreatedBy", fields: [createdById], references: [id])
+  currentVersion  CourseVersion?    @relation("CourseCurrentVersion", fields: [currentVersionId], references: [id])
+  versions        CourseVersion[]   @relation("CourseVersions")
+  enrollments     Enrollment[]
+  courseState     CourseState[]
+  sessionProgress SessionProgress[]
+  progressEvents  ProgressEvent[]
+
+  @@index([status, deletedAt])
+  @@map("courses")
+}
+
+model CourseVersion {
+  id            String    @id @default(uuid(7)) @db.Uuid
+  courseId      String    @map("course_id") @db.Uuid
+  /// Semver from the manifest.
+  version       String
+  /// The validated bud.manifest.json, stored verbatim.
+  manifest      Json
+  /// Object storage prefix. Immutable per version: new upload = new version = new path.
+  storagePrefix String    @map("storage_prefix")
+  sizeBytes     Int?      @map("size_bytes")
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  course      Course          @relation("CourseVersions", fields: [courseId], references: [id], onDelete: Cascade)
+  currentFor  Course?         @relation("CourseCurrentVersion")
+  sessions    CourseSession[]
+  enrollments Enrollment[]
+
+  @@unique([courseId, version])
+  @@index([courseId])
+  @@map("course_versions")
+}
+
+/// Denormalised from the manifest so the session rail and progress maths are
+/// plain SQL instead of JSON digging on every request.
+model CourseSession {
+  id              String  @id @default(uuid(7)) @db.Uuid
+  courseVersionId String  @map("course_version_id") @db.Uuid
+  /// The manifest session id. This is the key progress is recorded against.
+  key             String
+  order           Int
+  title           String
+  entryPath       String  @map("entry_path")
+  weight          String?
+  deliverable     String?
+
+  courseVersion CourseVersion @relation(fields: [courseVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([courseVersionId, key])
+  @@index([courseVersionId, order])
+  @@map("course_sessions")
+}
+
+// ─────────────────────────────── progress ───────────────────────────────
+
+model Enrollment {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  courseId        String    @map("course_id") @db.Uuid
+  /// The version the learner is currently pinned to.
+  courseVersionId String    @map("course_version_id") @db.Uuid
+  startedAt       DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  completedAt     DateTime? @map("completed_at") @db.Timestamptz(3)
+  lastSessionKey  String?   @map("last_session_key")
+  lastOpenedAt    DateTime? @map("last_opened_at") @db.Timestamptz(3)
+  unenrolledAt    DateTime? @map("unenrolled_at") @db.Timestamptz(3)
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course        Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseVersion CourseVersion @relation(fields: [courseVersionId], references: [id])
+
+  @@unique([userId, courseId])
+  @@index([userId, lastOpenedAt])
+  @@map("enrollments")
+}
+
+/// The storage bridge: exactly what window.storage.get/set moves, nothing more.
+/// Opaque to the platform by design — the shell never parses course state.
+model CourseState {
+  userId    String   @map("user_id") @db.Uuid
+  courseId  String   @map("course_id") @db.Uuid
+  key       String
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([userId, courseId, key])
+  @@map("course_state")
+}
+
+enum ProgressStatus {
+  not_started
+  in_progress
+  complete
+
+  @@map("progress_status")
+}
+
+model SessionProgress {
+  userId      String         @map("user_id") @db.Uuid
+  courseId    String         @map("course_id") @db.Uuid
+  sessionKey  String         @map("session_key")
+  status      ProgressStatus @default(not_started)
+  /// Optional fine-grained progress for the growth meter, 0..1.
+  fraction    Decimal?       @db.Decimal(4, 3)
+  startedAt   DateTime?      @map("started_at") @db.Timestamptz(3)
+  completedAt DateTime?      @map("completed_at") @db.Timestamptz(3)
+  updatedAt   DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([userId, courseId, sessionKey])
+  @@index([userId, courseId])
+  @@map("session_progress")
+}
+
+/// Append-only. Powers streaks, heatmaps and analytics later; costs one insert now.
+model ProgressEvent {
+  id         BigInt   @id @default(autoincrement())
+  userId     String   @map("user_id") @db.Uuid
+  courseId   String?  @map("course_id") @db.Uuid
+  sessionKey String?  @map("session_key")
+  type       String
+  payload    Json     @default("{}")
+  at         DateTime @default(now()) @db.Timestamptz(3)
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+
+  @@index([userId, at])
+  @@index([courseId, at])
+  @@map("progress_events")
+}
