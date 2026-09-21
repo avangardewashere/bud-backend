@@ -49,6 +49,13 @@ export const envSchema = z
 
     // origins
     APP_ORIGIN: z.url(),
+    /**
+     * Where to send a browser when a sign-in redirect fails — the shell's own
+     * sign-in route, which the API cannot know. Hardcoding it once meant every
+     * OAuth failure landed on a 404, which is a worse experience than the
+     * failure being reported.
+     */
+    APP_SIGN_IN_PATH: z.string().startsWith('/').default('/login'),
     COURSES_ORIGIN: z.url(),
     API_ORIGIN: z.url(),
     /**

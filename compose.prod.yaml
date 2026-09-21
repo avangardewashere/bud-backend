@@ -25,6 +25,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
 
       APP_ORIGIN: https://app.${BUD_DOMAIN}
+      APP_SIGN_IN_PATH: ${APP_SIGN_IN_PATH:-/login}
       COURSES_ORIGIN: https://courses.${BUD_DOMAIN}
       API_ORIGIN: https://api.${BUD_DOMAIN}
       # Serve course content from this process, on its own port, proxied by

@@ -65,6 +65,19 @@ describe('validateEnv', () => {
     expect(() => validateEnv({ ...baseEnv, COURSES_PORT: 'banana' })).toThrowError(/COURSES_PORT/);
   });
 
+  it('defaults the sign-in path to the route the shell actually serves', () => {
+    // Hardcoded as /sign-in once, while the shell serves /login — so every
+    // OAuth failure redirected to a 404.
+    expect(validateEnv({ ...baseEnv }).APP_SIGN_IN_PATH).toBe('/login');
+  });
+
+  it('insists the sign-in path is a path, not a URL', () => {
+    // An absolute URL here would let a misconfiguration redirect users off-site.
+    expect(() =>
+      validateEnv({ ...baseEnv, APP_SIGN_IN_PATH: 'https://evil.example/login' }),
+    ).toThrowError(/APP_SIGN_IN_PATH/);
+  });
+
   it('rejects a courses origin that matches the app origin', () => {
     // The sandbox only isolates course JavaScript if the origins actually differ.
     expect(() => validateEnv({ ...baseEnv, COURSES_ORIGIN: baseEnv.APP_ORIGIN })).toThrowError(

@@ -113,7 +113,7 @@ export class GithubOAuthController {
   }
 
   private backToShell(reply: FastifyReply, reason: string): void {
-    const url = new URL('/sign-in', this.config.get('APP_ORIGIN'));
+    const url = new URL(this.config.get('APP_SIGN_IN_PATH'), this.config.get('APP_ORIGIN'));
     url.searchParams.set('error', reason);
     void reply.redirect(url.toString(), HttpStatus.FOUND);
   }
