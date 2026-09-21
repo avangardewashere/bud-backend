@@ -45,6 +45,13 @@ export class NotesService {
   static readonly MAX_NOTE_BYTES = 256 * 1024;
   static readonly MAX_URL_LENGTH = 2048;
 
+  /**
+   * A deliverable is a link someone will click later, so the scheme is a
+   * security property rather than a formatting preference: a stored
+   * `javascript:` or `data:` URL is stored XSS aimed at whoever renders it.
+   */
+  private static readonly SAFE_URL = /^https?:\/\/[^\s]+$/i;
+
   constructor(private readonly prisma: PrismaService) {}
 
   /**
@@ -245,6 +252,21 @@ export class NotesService {
 
     if (input.url.length > NotesService.MAX_URL_LENGTH) {
       throw new AppException('validation_failed', 'That link is too long.', HttpStatus.BAD_REQUEST);
+    }
+
+    // Checked here as well as in the request schema, deliberately. The schema
+    // guards the HTTP boundary; this guards the service, so a caller that is
+    // not an HTTP request — a script, a future import, an admin tool — cannot
+    // store a scheme the shell will later render as a link. The two checks are
+    // independent on purpose, and the shell validates again on render for the
+    // same reason: the damage happens where it is rendered.
+    if (!NotesService.SAFE_URL.test(input.url)) {
+      throw new AppException(
+        'validation_failed',
+        'A deliverable must be an http or https link.',
+        HttpStatus.BAD_REQUEST,
+        `Refused "${input.url.slice(0, 40)}".`,
+      );
     }
 
     const submittedAt = input.submitted === false ? null : new Date();
