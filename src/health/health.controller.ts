@@ -7,7 +7,7 @@ import {
 } from '@nestjs/swagger';
 
 import { Public } from '../auth/decorators/public.decorator.js';
-import { PrismaService } from '../prisma/index.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { StorageService } from '../storage/storage.service.js';
 
 type CheckState = 'ok' | 'error';

@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { RolesGuard } from './auth/guards/roles.guard.js';
 import { SessionGuard } from './auth/guards/session.guard.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
+import { ErrorReporter } from './common/errors/error-reporter.js';
 import { AppConfigModule, AppConfigService } from './config/index.js';
 import { CourseSpecModule } from './course-spec/course-spec.module.js';
 import { CoursesModule } from './courses/courses.module.js';
@@ -68,6 +69,7 @@ import { StorageModule } from './storage/index.js';
     { provide: APP_GUARD, useClass: SessionGuard },
     // Runs second, so request.user is already resolved.
     { provide: APP_GUARD, useClass: RolesGuard },
+    ErrorReporter,
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })

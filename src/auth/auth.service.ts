@@ -9,8 +9,8 @@ import {
 import { createHash, randomBytes } from 'node:crypto';
 import { Prisma, type Role, type User } from '@prisma/client';
 
-import { AppConfigService } from '../config/index.js';
-import { PrismaService } from '../prisma/index.js';
+import { AppConfigService } from '../config/app-config.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import type { PublicUser } from './auth.types.js';
 import type { ChangePasswordInput, LoginInput, RegisterInput } from './dto/auth.schemas.js';
 import { PasswordService } from './password.service.js';

@@ -235,8 +235,12 @@ is a manual dispatch with an older `sha-` tag.
 
 ## Known gaps (intentional for Phase 0)
 
-- **GitHub OAuth** — env vars and the `oauth_accounts` table exist; the routes do
-  not yet. Everything is in place to add them without schema changes.
+- ~~GitHub OAuth~~ — **done.** `GET /auth/github` and its callback. Unconfigured,
+  the route 404s rather than existing and failing, and `GET /auth/providers`
+  tells the shell whether to render the button. A GitHub identity links to an
+  existing account by *verified* email; it cannot register a new one unless
+  `SIGNUP_MODE=open`, because an invite is bound to an email address and letting
+  GitHub vouch for one would make the invite the weaker check.
 - **Admin invite endpoint** — `AuthService.createInvite` exists but has no route,
   and now deliberately will not get one for a while: the owner decided
   (Overall Plan §8.1, 20 Sep 2026) that there is no learner two yet, so **no
@@ -249,4 +253,6 @@ is a manual dispatch with an older `sha-` tag.
   appears. See `src/auth/login-throttle.service.ts`.
 - **Object storage and mail** are configured but not used until Phase 1 (course
   upload) and Phase 2 (invites by email).
-- **Sentry** — `SENTRY_DSN` is read but not wired.
+- ~~Sentry~~ — **done.** Inert without `SENTRY_DSN`. Reports 5xx only: an error
+  tracker full of 401s is one nobody reads. Cookies, auth headers and request
+  bodies are stripped, and only a user *id* is attached — never an email.

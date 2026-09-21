@@ -2,7 +2,7 @@ import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import type { Course, CourseVersion, Enrollment } from '@prisma/client';
 
 import { AppException } from '../common/errors/app-exception.js';
-import { PrismaService } from '../prisma/index.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 
 export interface SessionProgressView {
   sessionKey: string;

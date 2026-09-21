@@ -2,7 +2,7 @@ import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { Buffer } from 'node:buffer';
 
 import { AppException } from '../common/errors/app-exception.js';
-import { PrismaService } from '../prisma/index.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 
 /**
  * The storage bridge: exactly what `window.storage.get/set/delete` moves, and

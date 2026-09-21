@@ -1,6 +1,7 @@
 import type { ReferenceObject, SchemaObject } from '@nestjs/swagger';
 
 import {
+  authProvidersSchema,
   changePasswordResultSchema,
   errorSchema,
   publicUserSchema,
@@ -52,6 +53,7 @@ export const componentSchemas = {
   } satisfies SchemaObject,
 
   ChangePasswordResult: openApiSchema(changePasswordResultSchema, 'output'),
+  AuthProviders: openApiSchema(authProvidersSchema, 'output'),
 
   /** The one error shape the whole API uses. */
   ErrorResponse: openApiSchema(errorSchema, 'output'),

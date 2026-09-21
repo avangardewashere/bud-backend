@@ -3,8 +3,8 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { AuthSession } from '@prisma/client';
 import type { FastifyReply } from 'fastify';
 
-import { AppConfigService } from '../config/index.js';
-import { PrismaService } from '../prisma/index.js';
+import { AppConfigService } from '../config/app-config.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import type { RequestSession, RequestUser } from './auth.types.js';
 
 /**

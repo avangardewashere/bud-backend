@@ -6,7 +6,7 @@ import { extractFiles } from '../course-spec/archive.js';
 import { CourseSpecService } from '../course-spec/course-spec.service.js';
 import type { CourseManifest } from '../course-spec/manifest.schema.js';
 import type { ValidationReport } from '../course-spec/validation.types.js';
-import { PrismaService } from '../prisma/index.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { contentTypeFor, StorageService } from '../storage/storage.service.js';
 
 export interface IngestResult {

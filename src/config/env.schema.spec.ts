@@ -47,6 +47,24 @@ describe('validateEnv', () => {
     expect(env.SENTRY_DSN).toBeUndefined();
   });
 
+  it('treats an empty COURSES_PORT as unset rather than as zero', () => {
+    // .env files and compose spell "unset" as `COURSES_PORT=`, and z.coerce
+    // turns "" into 0 — which failed the range check and refused to boot. The
+    // documented default in .env.example is exactly this case.
+    const env = validateEnv({ ...baseEnv, COURSES_PORT: '' });
+
+    expect(env.COURSES_PORT).toBeUndefined();
+  });
+
+  it('still reads a COURSES_PORT that is set', () => {
+    expect(validateEnv({ ...baseEnv, COURSES_PORT: '3101' }).COURSES_PORT).toBe(3101);
+  });
+
+  it('rejects a nonsense COURSES_PORT rather than silently ignoring it', () => {
+    expect(() => validateEnv({ ...baseEnv, COURSES_PORT: '0' })).toThrowError(/COURSES_PORT/);
+    expect(() => validateEnv({ ...baseEnv, COURSES_PORT: 'banana' })).toThrowError(/COURSES_PORT/);
+  });
+
   it('rejects a courses origin that matches the app origin', () => {
     // The sandbox only isolates course JavaScript if the origins actually differ.
     expect(() => validateEnv({ ...baseEnv, COURSES_ORIGIN: baseEnv.APP_ORIGIN })).toThrowError(

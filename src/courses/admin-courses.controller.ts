@@ -31,7 +31,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { openApiSchema, zodBody } from '../common/validation/zod.pipe.js';
 import { DEFAULT_ARCHIVE_LIMITS } from '../course-spec/archive.js';
 import { ref } from '../openapi/components.js';
-import { PrismaService } from '../prisma/index.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { IngestService } from './ingest.service.js';
 import {
   listQuerySchema,

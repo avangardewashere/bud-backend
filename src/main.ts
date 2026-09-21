@@ -11,6 +11,7 @@ import fastifyRateLimit from '@fastify/rate-limit';
 import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module.js';
+import { ErrorReporter } from './common/errors/error-reporter.js';
 import { AppConfigService } from './config/index.js';
 import { buildCoursesServer } from './course-serving/courses-server.js';
 import { StorageService } from './storage/storage.service.js';
@@ -79,6 +80,13 @@ async function bootstrap(): Promise<void> {
 
   // Shut down cleanly so in-flight requests finish and Prisma disconnects.
   app.enableShutdownHooks();
+
+  // A process that dies with its error report still buffered has told nobody
+  // what killed it.
+  const reporter = app.get(ErrorReporter);
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(signal, () => void reporter.flush());
+  }
 
   if (!config.isProduction) {
     const swaggerConfig = new DocumentBuilder()

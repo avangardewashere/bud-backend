@@ -28,6 +28,8 @@ import type { FastifyReply } from 'fastify';
 import { openApiSchema, zodBody } from '../common/validation/zod.pipe.js';
 import { ref } from '../openapi/components.js';
 import { AuthService } from './auth.service.js';
+import { GithubOAuthService } from './github-oauth.service.js';
+import { AppConfigService } from '../config/app-config.service.js';
 import type { AuthenticatedRequest, PublicUser, RequestUser } from './auth.types.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
@@ -49,7 +51,27 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly sessions: SessionService,
     private readonly throttle: LoginThrottleService,
+    private readonly github: GithubOAuthService,
+    private readonly config: AppConfigService,
   ) {}
+
+  @Public()
+  @Get('providers')
+  @ApiOperation({
+    summary: 'Which sign-in options this deployment offers',
+    description:
+      'So the shell can decide whether to render a GitHub button and a register ' +
+      'link, rather than showing controls that lead to a 404.',
+  })
+  @ApiOkResponse({ description: 'Available providers.', schema: ref('AuthProviders') })
+  providers() {
+    return {
+      password: true,
+      github: this.github.enabled,
+      /** invite_only and closed both mean "no self-service registration". */
+      signupMode: this.config.get('SIGNUP_MODE'),
+    };
+  }
 
   @Public()
   @Post('register')

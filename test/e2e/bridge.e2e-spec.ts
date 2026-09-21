@@ -169,6 +169,32 @@ describe.skipIf(!up)('the storage bridge', () => {
     });
   });
 
+  describe('sign-in options', () => {
+    it('tells the shell which providers exist, without a session', async () => {
+      // The sign-in screen has to render before anyone is signed in, and a
+      // GitHub button that leads to a 404 is worse than no button.
+      const response = await new ApiClient().get<{
+        password: boolean;
+        github: boolean;
+        signupMode: string;
+      }>('/auth/providers');
+
+      expect(response.status).toBe(200);
+      expect(response.body.password).toBe(true);
+      expect(typeof response.body.github).toBe('boolean');
+      expect(['invite_only', 'open', 'closed']).toContain(response.body.signupMode);
+    });
+
+    it('404s the GitHub route when it is not configured', async () => {
+      const providers = await new ApiClient().get<{ github: boolean }>('/auth/providers');
+
+      if (!providers.body.github) {
+        const response = await new ApiClient().get('/auth/github');
+        expect(response.status).toBe(404);
+      }
+    });
+  });
+
   describe('the error envelope', () => {
     it('carries a stable code on every error, not just storage ones', async () => {
       const unknownCourse = await api.get<ErrorBody>('/me/courses/no-such-course/state/k');
@@ -245,7 +271,7 @@ describe.skipIf(!up)('progress', () => {
 
   it('reflects completion in the dashboard', async () => {
     const response = await api.get<{
-      continueCard: { slug: string; resuming: boolean } | null;
+      continueCard: { slug: string; sessionKey: string; resuming: boolean } | null;
       totals: { completedSessions: number; totalSessions: number };
     }>('/me/dashboard');
 
@@ -253,8 +279,52 @@ describe.skipIf(!up)('progress', () => {
     expect(response.body.totals.totalSessions).toBe(10);
     expect(response.body.totals.completedSessions).toBeGreaterThanOrEqual(1);
     expect(response.body.continueCard?.slug).toBe(SLUG);
-    // They have opened something, so the card is a resume rather than a start.
-    expect(response.body.continueCard?.resuming).toBe(true);
+    // This assertion used to require `resuming: true` here, which was only true
+    // because the card offered the session that had just been completed. It
+    // encoded the bug. What matters is that the card never points at finished
+    // work — `resuming` is then a consequence, and is asserted directly in "the
+    // continue card" below.
+    expect(response.body.continueCard?.sessionKey).not.toBe('s1');
+  });
+
+  describe('the continue card', () => {
+    it('offers the next unfinished session, not the one just completed', async () => {
+      // "Continue where you left off" means the next thing to do. Offering a
+      // session the learner has already ticked off sends them back into
+      // finished work — and mockup 1b labels this panel "UP NEXT".
+      await api.post(session('s1') + '/complete');
+
+      const dashboard = await api.get<{
+        continueCard: { sessionKey: string; resuming: boolean } | null;
+      }>('/me/dashboard');
+
+      expect(dashboard.body.continueCard?.sessionKey).not.toBe('s1');
+    });
+
+    it('resumes a session that was opened but not finished', async () => {
+      await api.post(session('s4') + '/open');
+
+      const dashboard = await api.get<{
+        continueCard: { sessionKey: string; resuming: boolean } | null;
+      }>('/me/dashboard');
+
+      expect(dashboard.body.continueCard?.sessionKey).toBe('s4');
+      // Picking up something started, rather than beginning something new.
+      expect(dashboard.body.continueCard?.resuming).toBe(true);
+    });
+
+    it('moves on once that session is finished too', async () => {
+      await api.post(session('s4') + '/open');
+      await api.post(session('s4') + '/complete');
+
+      const dashboard = await api.get<{
+        continueCard: { sessionKey: string; resuming: boolean } | null;
+      }>('/me/dashboard');
+
+      expect(dashboard.body.continueCard?.sessionKey).not.toBe('s4');
+      // A fresh start, not a resume.
+      expect(dashboard.body.continueCard?.resuming).toBe(false);
+    });
   });
 
   it('reports per-session progress for the rail', async () => {

@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Course, CourseVersion, Enrollment } from '@prisma/client';
 
-import { AppConfigService } from '../config/index.js';
-import { PrismaService } from '../prisma/index.js';
+import { AppConfigService } from '../config/app-config.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { StorageService } from '../storage/storage.service.js';
 import type {
   CourseDetail,

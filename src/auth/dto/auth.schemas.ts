@@ -86,3 +86,10 @@ export const errorSchema = z.object({
   path: z.string(),
   timestamp: z.iso.datetime(),
 });
+
+/** What the sign-in screen needs to know before it renders. */
+export const authProvidersSchema = z.object({
+  password: z.boolean(),
+  github: z.boolean(),
+  signupMode: z.enum(['invite_only', 'open', 'closed']),
+});

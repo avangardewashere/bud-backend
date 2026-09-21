@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 
 import { defaultCodeForStatus } from '../errors/app-exception.js';
+import { ErrorReporter } from '../errors/error-reporter.js';
 
 interface ErrorBody {
   statusCode: number;
@@ -37,6 +38,8 @@ interface ErrorBody {
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger('ExceptionFilter');
 
+  constructor(private readonly reporter: ErrorReporter) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const reply = ctx.getResponse<FastifyReply>();
@@ -44,11 +47,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const body = this.toErrorBody(exception, request.url);
 
+    // 5xx only. A 401 or a 404 is the API working; an error tracker full of
+    // them is one nobody reads, and the signal it was bought for is lost.
     if (body.statusCode >= 500) {
       this.logger.error(
         { err: exception, path: request.url, method: request.method },
         'Unhandled exception',
       );
+
+      this.reporter.report(exception, {
+        path: request.url,
+        method: request.method,
+        userId: request.user?.id,
+      });
     }
 
     void reply.status(body.statusCode).send(body);

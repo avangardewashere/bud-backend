@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
-import { AppConfigService } from '../config/index.js';
+import { AppConfigService } from '../config/app-config.service.js';
 
 /**
  * Prisma 7 has no Rust query engine and no datasource URL in the schema: the

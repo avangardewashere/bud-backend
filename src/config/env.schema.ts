@@ -17,6 +17,19 @@ const boolEnv = (fallback: 'true' | 'false') =>
     .default(fallback)
     .transform((v) => v === 'true');
 
+/**
+ * An optional number that treats an empty variable as absent.
+ *
+ * `z.coerce.number()` turns "" into 0, so a variable written as `FOO=` — which
+ * is how .env files and compose spell "unset" — becomes a zero that fails every
+ * range check. `.optional()` does not help: the key is present, its value is
+ * just empty.
+ */
+const optionalPort = z.preprocess(
+  (v) => (v === '' || v === undefined ? undefined : v),
+  z.coerce.number().int().min(1).max(65535).optional(),
+);
+
 /** Treats an empty variable as absent, which is how shells and compose files write "unset". */
 const optionalString = z
   .string()
@@ -45,7 +58,7 @@ export const envSchema = z
      * on the API. Leave unset to not serve courses from this process at all,
      * which is what you want in development while the shell runs its own.
      */
-    COURSES_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+    COURSES_PORT: optionalPort,
 
     // database
     DATABASE_URL: z.string().min(1),
