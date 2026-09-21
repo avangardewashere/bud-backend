@@ -26,6 +26,13 @@ export class HealthController {
    * Liveness. Deliberately checks nothing external: if this fails the process
    * is broken and should be restarted. A dead database is not a reason to
    * restart — restarting fixes nothing and turns an outage into a crash loop.
+   *
+   * It must also stay free of any database call, for two callers that run
+   * without a user in sight: Render's health check, which probes while the
+   * instance is up, and the shell's login page, which calls it on load to
+   * wake a sleeping instance. Either one touching Postgres would keep Neon
+   * from scaling to zero and spend its free compute hours. health.controller.spec
+   * holds this.
    */
   @Public()
   @Get('health')
