@@ -52,6 +52,8 @@ model User {
   courseState     CourseState[]
   sessionProgress SessionProgress[]
   progressEvents  ProgressEvent[]
+  notes           Note[]
+  deliverables    Deliverable[]
 
   @@index([deletedAt])
   @@map("users")
@@ -148,6 +150,8 @@ model Course {
   courseState     CourseState[]
   sessionProgress SessionProgress[]
   progressEvents  ProgressEvent[]
+  notes           Note[]
+  deliverables    Deliverable[]
 
   @@index([status, deletedAt])
   @@map("courses")
@@ -278,4 +282,52 @@ model ProgressEvent {
   @@index([userId, at])
   @@index([courseId, at])
   @@map("progress_events")
+}
+
+// ────────────────────────────── notes (Phase 2) ─────────────────────────────
+
+/// One markdown note per session, per learner.
+///
+/// Every Docker session asks for a notes.md entry, so this is the platform
+/// holding what the course already asks people to write. Keyed by session key
+/// rather than version, like all progress: re-uploading a course must not
+/// orphan someone's notes.
+model Note {
+  userId     String   @map("user_id") @db.Uuid
+  courseId   String   @map("course_id") @db.Uuid
+  sessionKey String   @map("session_key")
+  bodyMd     String   @map("body_md")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([userId, courseId, sessionKey])
+  @@index([userId, updatedAt])
+  @@map("notes")
+}
+
+/// What a learner produced for a session: a link to a repo or a live site.
+///
+/// No grading, by design — "submitted" is the learner's own claim, and the
+/// platform's job is to remember it, not to judge it.
+model Deliverable {
+  userId      String    @map("user_id") @db.Uuid
+  courseId    String    @map("course_id") @db.Uuid
+  sessionKey  String    @map("session_key")
+  url         String
+  /// Optional note about the submission itself, distinct from session notes.
+  comment     String?
+  /// Set when the learner marks it done; cleared if they retract it.
+  submittedAt DateTime? @map("submitted_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@id([userId, courseId, sessionKey])
+  @@index([userId, submittedAt])
+  @@map("deliverables")
 }

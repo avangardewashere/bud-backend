@@ -19,6 +19,12 @@ import {
   progressSummarySchema,
 } from '../courses/dto/course.schemas.js';
 import {
+  deliverableListSchema,
+  deliverableSchema,
+  noteListSchema,
+  noteSchema,
+} from '../notes/dto/notes.schemas.js';
+import {
   dashboardSchema,
   sessionProgressListSchema,
   sessionProgressSchema,
@@ -79,6 +85,12 @@ export const componentSchemas = {
   SessionProgress: openApiSchema(sessionProgressSchema, 'output'),
   SessionProgressList: openApiSchema(sessionProgressListSchema, 'output'),
   Dashboard: openApiSchema(dashboardSchema, 'output'),
+
+  // ── notes and deliverables ────────────────────────────────────────────────
+  Note: openApiSchema(noteSchema, 'output'),
+  NoteList: openApiSchema(noteListSchema, 'output'),
+  Deliverable: openApiSchema(deliverableSchema, 'output'),
+  DeliverableList: openApiSchema(deliverableListSchema, 'output'),
 } satisfies Record<string, SchemaObject>;
 
 export type ComponentName = keyof typeof componentSchemas;

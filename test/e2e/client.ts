@@ -112,8 +112,13 @@ export async function ensureTestUser(email: string, password: string): Promise<s
     });
 
     // Start from a known state: previous runs left state and progress behind.
+    // Every table the suite writes to belongs here — adding one and forgetting
+    // this is how a test starts passing or failing for reasons that have
+    // nothing to do with the code it is testing.
     await prisma.courseState.deleteMany({ where: { userId: user.id } });
     await prisma.sessionProgress.deleteMany({ where: { userId: user.id } });
+    await prisma.note.deleteMany({ where: { userId: user.id } });
+    await prisma.deliverable.deleteMany({ where: { userId: user.id } });
     await prisma.enrollment.deleteMany({ where: { userId: user.id } });
 
     return user.id;
