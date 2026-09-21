@@ -29,10 +29,55 @@ export interface DashboardCourse {
   completedAt: string | null;
 }
 
+/** The slice of a course the dashboard queries load. */
+interface EnrolledCourse {
+  slug: string;
+  title: string;
+  accentColor: string | null;
+  currentVersion: {
+    sessions: {
+      key: string;
+      title: string;
+      order: number;
+      weight: string | null;
+      deliverable: string | null;
+    }[];
+  } | null;
+}
+
+export interface RecentNote {
+  slug: string;
+  courseTitle: string;
+  sessionKey: string;
+  sessionTitle: string | null;
+  /** First line or so, for a dashboard card — not the whole note. */
+  excerpt: string;
+  updatedAt: string;
+}
+
+export interface UpcomingDeliverable {
+  slug: string;
+  courseTitle: string;
+  sessionKey: string;
+  sessionTitle: string;
+  /** What the manifest asks for. */
+  asked: string;
+  /** True once the learner has finished the session it belongs to. */
+  sessionComplete: boolean;
+}
+
 export interface Dashboard {
   /** Null on a first visit, which is mockup 1j's empty state rather than an error. */
   continueCard: ContinueCard | null;
   courses: DashboardCourse[];
+  /** Most recently edited first. Phase 2 §5.5. */
+  recentNotes: RecentNote[];
+  /**
+   * Sessions that ask for a deliverable the learner has not submitted yet.
+   * Ordered so the ones they have already finished come first: those are the
+   * ones with nothing left to do but hand in.
+   */
+  upcomingDeliverables: UpcomingDeliverable[];
   totals: {
     enrolledCourses: number;
     completedCourses: number;
@@ -104,6 +149,8 @@ export class DashboardService {
     return {
       continueCard: this.buildContinueCard(enrollments, completedByCourse),
       courses,
+      recentNotes: await this.recentNotes(userId, enrollments),
+      upcomingDeliverables: await this.upcomingDeliverables(userId, enrollments, completedByCourse),
       totals: {
         enrolledCourses: courses.length,
         completedCourses: courses.filter((c) => c.completedAt !== null).length,
@@ -111,6 +158,99 @@ export class DashboardService {
         totalSessions: courses.reduce((sum, c) => sum + c.totalSessions, 0),
       },
     };
+  }
+
+  /**
+   * The notes touched most recently, across every enrolled course.
+   *
+   * Excerpted rather than returned whole: this feeds a dashboard card, and
+   * shipping a 200 KB note to render three lines of it would make the first
+   * screen after sign-in as slow as the longest thing anyone has written.
+   */
+  private async recentNotes(
+    userId: string,
+    enrollments: { courseId: string; course: EnrolledCourse }[],
+  ): Promise<RecentNote[]> {
+    if (enrollments.length === 0) {
+      return [];
+    }
+
+    const byCourseId = new Map(enrollments.map((e) => [e.courseId, e.course]));
+
+    const notes = await this.prisma.note.findMany({
+      where: { userId, courseId: { in: [...byCourseId.keys()] } },
+      orderBy: { updatedAt: 'desc' },
+      take: 5,
+    });
+
+    return notes.flatMap((note) => {
+      const course = byCourseId.get(note.courseId);
+      if (!course) {
+        return [];
+      }
+
+      const session = course.currentVersion?.sessions.find((s) => s.key === note.sessionKey);
+
+      return [
+        {
+          slug: course.slug,
+          courseTitle: course.title,
+          sessionKey: note.sessionKey,
+          sessionTitle: session?.title ?? null,
+          excerpt: excerpt(note.bodyMd),
+          updatedAt: note.updatedAt.toISOString(),
+        },
+      ];
+    });
+  }
+
+  /**
+   * Sessions whose manifest asks for a deliverable the learner has not handed
+   * in. Finished sessions come first: those are the ones where the work is
+   * done and only the handing in is outstanding, which is the nudge worth
+   * showing.
+   */
+  private async upcomingDeliverables(
+    userId: string,
+    enrollments: { courseId: string; course: EnrolledCourse }[],
+    completedByCourse: Map<string, Set<string>>,
+  ): Promise<UpcomingDeliverable[]> {
+    if (enrollments.length === 0) {
+      return [];
+    }
+
+    const submitted = new Set(
+      (
+        await this.prisma.deliverable.findMany({
+          where: { userId, submittedAt: { not: null } },
+          select: { courseId: true, sessionKey: true },
+        })
+      ).map((d) => `${d.courseId}:${d.sessionKey}`),
+    );
+
+    const rows: UpcomingDeliverable[] = [];
+
+    for (const { courseId, course } of enrollments) {
+      const complete = completedByCourse.get(courseId) ?? new Set<string>();
+
+      for (const session of course.currentVersion?.sessions ?? []) {
+        // Only sessions that actually ask for something.
+        if (!session.deliverable || submitted.has(`${courseId}:${session.key}`)) {
+          continue;
+        }
+
+        rows.push({
+          slug: course.slug,
+          courseTitle: course.title,
+          sessionKey: session.key,
+          sessionTitle: session.title,
+          asked: session.deliverable,
+          sessionComplete: complete.has(session.key),
+        });
+      }
+    }
+
+    return rows.sort((a, b) => Number(b.sessionComplete) - Number(a.sessionComplete)).slice(0, 10);
   }
 
   /**
@@ -176,4 +316,21 @@ export class DashboardService {
       resuming,
     };
   }
+}
+
+/**
+ * A few lines of a note, for a card. Takes whole lines rather than cutting at a
+ * character count, so an excerpt never ends mid-word or mid-syntax.
+ */
+function excerpt(bodyMd: string, maxChars = 200): string {
+  const text = bodyMd.trim();
+
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const cut = text.slice(0, maxChars);
+  const lastBreak = Math.max(cut.lastIndexOf('\n'), cut.lastIndexOf(' '));
+
+  return `${cut.slice(0, lastBreak > 0 ? lastBreak : maxChars).trimEnd()}…`;
 }

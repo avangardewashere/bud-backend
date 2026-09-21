@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { AuthSession } from '@prisma/client';
 import type { FastifyReply } from 'fastify';
@@ -16,8 +16,21 @@ import type { RequestSession, RequestUser } from './auth.types.js';
  * and can be revoked server-side at any time — the thing JWTs cannot do.
  */
 @Injectable()
-export class SessionService {
+export class SessionService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SessionService.name);
+
+  /**
+   * Expired rows are dead weight: every sign-in adds one and nothing removed
+   * them, so the table only ever grew. `resolve()` deletes the expired row it
+   * happens to touch, but a session nobody comes back to is never touched
+   * again — which is exactly the case that accumulates.
+   */
+  private static readonly PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+  /** Long enough that boot is not competing with a delete on a cold database. */
+  private static readonly PRUNE_DELAY_MS = 60_000;
+
+  private pruneTimer?: NodeJS.Timeout;
+  private startupTimer?: NodeJS.Timeout;
 
   /**
    * Writing lastUsedAt on every single request would turn every read into a
@@ -29,6 +42,32 @@ export class SessionService {
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
   ) {}
+
+  onModuleInit(): void {
+    const prune = () => {
+      void this.pruneExpired()
+        .then((count) => {
+          if (count > 0) {
+            this.logger.log(`Pruned ${count} expired session${count === 1 ? '' : 's'}`);
+          }
+        })
+        // Housekeeping failing must never take the process with it.
+        .catch((error: unknown) => this.logger.warn({ err: error }, 'Session prune failed'));
+    };
+
+    this.startupTimer = setTimeout(prune, SessionService.PRUNE_DELAY_MS);
+    this.pruneTimer = setInterval(prune, SessionService.PRUNE_INTERVAL_MS);
+
+    // Neither timer should keep the process alive: a container that will not
+    // exit on SIGTERM gets killed instead, and in tests it would hang the run.
+    this.startupTimer.unref();
+    this.pruneTimer.unref();
+  }
+
+  onModuleDestroy(): void {
+    clearTimeout(this.startupTimer);
+    clearInterval(this.pruneTimer);
+  }
 
   /** Hash a raw cookie value into the database key. */
   private static hashToken(rawToken: string): string {

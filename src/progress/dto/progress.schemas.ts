@@ -43,10 +43,35 @@ export const dashboardCourseSchema = z.object({
   completedAt: z.iso.datetime().nullable(),
 });
 
+export const recentNoteSchema = z.object({
+  slug: z.string(),
+  courseTitle: z.string(),
+  sessionKey: z.string(),
+  sessionTitle: z.string().nullable(),
+  /** A few lines, for a card — not the whole note. */
+  excerpt: z.string(),
+  updatedAt: z.iso.datetime(),
+});
+
+export const upcomingDeliverableSchema = z.object({
+  slug: z.string(),
+  courseTitle: z.string(),
+  sessionKey: z.string(),
+  sessionTitle: z.string(),
+  /** What the manifest asks for. */
+  asked: z.string(),
+  /** True when the session is finished and only the handing in is left. */
+  sessionComplete: z.boolean(),
+});
+
 export const dashboardSchema = z.object({
   /** Null on a first visit — the empty state, not an error. */
   continueCard: continueCardSchema.nullable(),
   courses: z.array(dashboardCourseSchema),
+  /** Most recently edited first, at most five. */
+  recentNotes: z.array(recentNoteSchema),
+  /** Finished sessions first: those need only handing in. At most ten. */
+  upcomingDeliverables: z.array(upcomingDeliverableSchema),
   totals: z.object({
     enrolledCourses: z.int().nonnegative(),
     completedCourses: z.int().nonnegative(),

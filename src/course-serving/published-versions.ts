@@ -1,4 +1,6 @@
-import type { PrismaService } from '../prisma/prisma.service.js';
+import { Injectable } from '@nestjs/common';
+
+import { PrismaService } from '../prisma/prisma.service.js';
 
 /**
  * Decides whether a course version may be served publicly.
@@ -13,6 +15,7 @@ import type { PrismaService } from '../prisma/prisma.service.js';
  * would make the content path depend on the database's latency as well as its
  * availability.
  */
+@Injectable()
 export class PublishedVersions {
   /**
    * Short. Publishing is rare, so staleness is nearly always irrelevant — but
@@ -50,7 +53,16 @@ export class PublishedVersions {
     return isPublic;
   }
 
-  /** Forgets everything. Called after a publish so the change takes effect at once. */
+  /**
+   * Forgets everything, so a publish or an unpublish takes effect immediately
+   * on this instance rather than after the TTL.
+   *
+   * Only this instance: with more than one replica the others still wait out
+   * their own TTL, so the worst case across a cluster remains the TTL. That
+   * matters if the admin UI ever grows a "take this down now" button — it
+   * would be honest on one instance and up to 30 seconds late on the rest,
+   * and the copy should say so rather than imply instant.
+   */
   invalidate(): void {
     this.cache.clear();
   }

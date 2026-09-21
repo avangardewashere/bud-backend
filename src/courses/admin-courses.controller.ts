@@ -31,6 +31,7 @@ import { Roles } from '../auth/decorators/roles.decorator.js';
 import { openApiSchema, zodBody } from '../common/validation/zod.pipe.js';
 import { DEFAULT_ARCHIVE_LIMITS } from '../course-spec/archive.js';
 import { ref } from '../openapi/components.js';
+import { PublishedVersions } from '../course-serving/published-versions.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { IngestService } from './ingest.service.js';
 import {
@@ -53,6 +54,7 @@ export class AdminCoursesController {
   constructor(
     private readonly ingest: IngestService,
     private readonly prisma: PrismaService,
+    private readonly published: PublishedVersions,
   ) {}
 
   @Post()
@@ -251,6 +253,11 @@ export class AdminCoursesController {
         },
       });
     });
+
+    // Publishing, unpublishing or pointing at another version all change what
+    // the content origin may serve. Drop the cache now rather than leaving the
+    // change to take effect whenever the TTL happens to expire.
+    this.published.invalidate();
 
     return {
       id: updated.id,
