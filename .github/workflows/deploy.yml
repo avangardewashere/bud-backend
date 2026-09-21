@@ -36,9 +36,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     # workflow_run fires whatever the outcome, so check it actually passed.
+    # DEPLOY_ENABLED is a repository variable: until a host and its secrets
+    # exist, every green CI run would otherwise end in a red deploy that failed
+    # at the SSH step for want of a key. Set it to 'true' once they do.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      vars.DEPLOY_ENABLED == 'true' && (
+        github.event_name == 'workflow_dispatch' ||
+        github.event.workflow_run.conclusion == 'success'
+      )
     environment: production
     steps:
       - name: Resolve the image tag
