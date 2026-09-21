@@ -64,7 +64,9 @@ async function main(): Promise<void> {
     fail('DATABASE_URL is not set.');
   }
 
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  const prisma = new PrismaClient({
+    adapter: new PrismaPg({ connectionString, connectionTimeoutMillis: 15_000 }),
+  });
 
   try {
     const admin = await prisma.user.findFirst({

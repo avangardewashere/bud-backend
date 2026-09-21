@@ -51,7 +51,10 @@ async function main(): Promise<void> {
   }
 
   const prisma = new PrismaClient({
-    adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
+    adapter: new PrismaPg({
+      connectionString: process.env.DATABASE_URL!,
+      connectionTimeoutMillis: 15_000,
+    }),
   });
 
   try {

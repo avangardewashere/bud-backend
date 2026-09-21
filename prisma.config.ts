@@ -15,7 +15,11 @@ if (existsSync('.env')) {
 export default defineConfig({
   schema: 'prisma/schema.prisma',
   datasource: {
-    url: process.env.DATABASE_URL,
+    // Migrations need a direct connection. Behind a transaction-mode pooler
+    // (Neon's `-pooler` host, PgBouncer) they fail with 'prepared statement
+    // "s0" already exists', so where the app's DATABASE_URL is pooled, set
+    // DATABASE_URL_UNPOOLED to the direct one. Unset, both are the same.
+    url: process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL,
   },
   migrations: {
     path: 'prisma/migrations',

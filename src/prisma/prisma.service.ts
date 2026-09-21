@@ -14,7 +14,15 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
   constructor(config: AppConfigService) {
     super({
-      adapter: new PrismaPg({ connectionString: config.get('DATABASE_URL') }),
+      adapter: new PrismaPg({
+        connectionString: config.get('DATABASE_URL'),
+        // node-postgres waits forever for a connection by default. A database
+        // that scales to zero (Neon's free tier suspends after five idle
+        // minutes) takes a few seconds to resume, and one whose quota is spent
+        // never does — a request should fail and say so, not hang. Generous
+        // enough for a cold resume.
+        connectionTimeoutMillis: 15_000,
+      }),
       log: config.isProduction ? ['warn', 'error'] : ['query', 'warn', 'error'],
     });
   }
