@@ -1,5 +1,5 @@
 /**
- * Create an invite.
+ * Create an invite. Compiled into dist/ so it runs in the production image.
  *
  *   npm run invite -- someone@example.com
  *   npm run invite -- someone@example.com --admin --days 30

@@ -81,6 +81,8 @@ curl -b cookies.txt http://localhost:3102/me
 | `npm run prisma:deploy` | Apply migrations (what CI and deploys run) |
 | `npm run prisma:studio` | Browse the database |
 | `npm run db:seed` | Create the admin user (refuses to run in production) |
+| `npm run admin:create -- <email>` | Create the **first** admin on any database, production included. Generates the password and prints it once; refuses once an admin exists. Needs `npm run build` |
+| `npm run invite -- <email> [--admin]` | Invite someone. Prints the link once. Needs `npm run build` |
 
 ---
 
