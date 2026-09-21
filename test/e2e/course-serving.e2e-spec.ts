@@ -103,6 +103,20 @@ describe.skipIf(!enabled)('course serving', () => {
     expect(csp).not.toContain("'self'");
   });
 
+  it('sandboxes the course however it is opened, not only inside the player', async () => {
+    // Opened directly — or through the shell's /api proxy, on the shell's own
+    // origin — a course document must still get an opaque origin. The flags
+    // are the player iframe's, and never include allow-same-origin.
+    for (const path of [worksheet, `${prefix}/docker-10-session-course.md`]) {
+      const csp = (await fetch(`${base}${path}`)).headers.get('content-security-policy') ?? '';
+
+      expect(csp, path).toMatch(/(^|; )sandbox allow-scripts allow-forms allow-modals(;|$)/);
+      expect(csp, path).not.toContain('allow-same-origin');
+      expect(csp, path).not.toContain('allow-popups');
+      expect(csp, path).not.toContain('allow-top-navigation');
+    }
+  });
+
   it('refuses to let the browser sniff a type', async () => {
     const response = await fetch(`${base}${worksheet}`);
 

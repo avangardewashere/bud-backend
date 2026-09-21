@@ -59,11 +59,17 @@ export const envSchema = z
     COURSES_ORIGIN: z.url(),
     API_ORIGIN: z.url(),
     /**
-     * Port for the course-content listener. Course files must be served from a
-     * different *host* to the shell, not merely a different port, because
-     * cookies ignore ports — so this is a second listener rather than a route
-     * on the API. Leave unset to not serve courses from this process at all,
-     * which is what you want in development while the shell runs its own.
+     * Port for course content. Course files must be served from a different
+     * *host* to the shell, not merely a different port, because cookies ignore
+     * ports.
+     *
+     * - A port other than PORT: a second listener, on its own hostname. The
+     *   normal arrangement.
+     * - Equal to PORT: served by the API's own listener, routed by path. For
+     *   hosts that expose one port per service; see main.ts for why that stays
+     *   isolated from the shell.
+     * - Unset: this process serves no courses, which is what you want in
+     *   development while the shell runs its own.
      */
     COURSES_PORT: optionalPort,
 
@@ -85,11 +91,21 @@ export const envSchema = z
     GITHUB_CLIENT_SECRET: optionalString,
 
     // object storage
-    S3_ENDPOINT: z.url(),
+    /**
+     * Where course package files live.
+     *
+     * - `s3` (default): any S3-compatible store — MinIO locally, R2 or S3 in
+     *   production. The S3_* variables below are then required.
+     * - `postgres`: a table in the main database. For free hosting with no
+     *   object store: a whole course is a few hundred KB, and this saves an
+     *   account, a card on file and a download cap. See storage/.
+     */
+    STORAGE_DRIVER: z.enum(['s3', 'postgres']).default('s3'),
+    S3_ENDPOINT: z.preprocess((v) => (v === '' ? undefined : v), z.url().optional()),
     S3_REGION: z.string().min(1).default('us-east-1'),
-    S3_BUCKET: z.string().min(1),
-    S3_ACCESS_KEY_ID: z.string().min(1),
-    S3_SECRET_ACCESS_KEY: z.string().min(1),
+    S3_BUCKET: optionalString,
+    S3_ACCESS_KEY_ID: optionalString,
+    S3_SECRET_ACCESS_KEY: optionalString,
     S3_FORCE_PATH_STYLE: boolEnv('true'),
 
     // mail
@@ -139,6 +155,20 @@ export const envSchema = z
       }
     }
 
+    // GitHub's callback sets the session cookie on API_ORIGIN's host. Where
+    // that host also serves course content (course content sharing the API's
+    // port), a live session would sit on the course origin. Refuse until the
+    // callback goes through the shell instead.
+    if (env.GITHUB_CLIENT_ID && new URL(env.API_ORIGIN).host === new URL(env.COURSES_ORIGIN).host) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['GITHUB_CLIENT_ID'],
+        message:
+          'GitHub sign-in would set the session cookie on the host that serves course content ' +
+          '(API_ORIGIN and COURSES_ORIGIN share a host). Point API_ORIGIN at the shell’s /api proxy.',
+      });
+    }
+
     // Half-configured OAuth is worse than none: the route would exist and fail.
     if (Boolean(env.GITHUB_CLIENT_ID) !== Boolean(env.GITHUB_CLIENT_SECRET)) {
       ctx.addIssue({
@@ -157,14 +187,75 @@ export type Env = z.infer<typeof envSchema>;
  * which is the point: a container that cannot be configured must not serve.
  */
 export function validateEnv(raw: Record<string, unknown>): Env {
-  const result = envSchema.safeParse(raw);
+  const env = withPlatformDefaults(raw);
+  const result = envSchema.safeParse(env);
 
-  if (!result.success) {
-    const lines = result.error.issues.map(
-      (issue) => `  - ${issue.path.join('.') || '(root)'}: ${issue.message}`,
-    );
+  // Checked beside the schema rather than in its superRefine: Zod skips
+  // refinements once any field has failed, so a missing DATABASE_URL would
+  // hide missing S3 settings until the next boot. Every problem, at once.
+  const lines = [
+    ...(result.success
+      ? []
+      : result.error.issues.map(
+          (issue) => `  - ${issue.path.join('.') || '(root)'}: ${issue.message}`,
+        )),
+    ...missingS3Settings(env).map(
+      (key) => `  - ${key}: ${key} is required when STORAGE_DRIVER is s3 (the default).`,
+    ),
+  ];
+
+  if (!result.success || lines.length > 0) {
     throw new Error(`Invalid environment configuration:\n${lines.join('\n')}`);
   }
 
   return result.data;
+}
+
+/** What an s3 driver needs and was not given. An empty variable counts as unset. */
+function missingS3Settings(env: Record<string, unknown>): string[] {
+  const driver = env.STORAGE_DRIVER;
+  if (driver !== undefined && driver !== '' && driver !== 's3') {
+    return [];
+  }
+
+  return ['S3_ENDPOINT', 'S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'].filter((key) => {
+    const value = env[key];
+    return value === undefined || (typeof value === 'string' && value.trim() === '');
+  });
+}
+
+/**
+ * Origins a host tells us about, used only where nothing was set explicitly.
+ *
+ * Render gives every web service RENDER_EXTERNAL_URL (https://<name>.onrender.com)
+ * at runtime. The service's own address is exactly what API_ORIGIN is, and —
+ * when course content shares its port — what COURSES_ORIGIN is too. Without
+ * this, both would have to be typed in before the first deploy, when the
+ * address is not yet known: Render appends a suffix when a name is taken.
+ *
+ * An explicit value always wins, and nothing is derived off Render.
+ */
+function withPlatformDefaults(raw: Record<string, unknown>): Record<string, unknown> {
+  const external = raw.RENDER_EXTERNAL_URL;
+  if (typeof external !== 'string' || external === '') {
+    return raw;
+  }
+
+  const isUnset = (key: string) => raw[key] === undefined || raw[key] === '';
+  const env = { ...raw };
+
+  if (isUnset('API_ORIGIN')) {
+    env.API_ORIGIN = external;
+  }
+  // Only when courses share the API's listener; a separate listener would be
+  // on a different address, which this variable does not describe.
+  const asText = (v: unknown) =>
+    typeof v === 'string' || typeof v === 'number' ? String(v) : undefined;
+  const sharesPort =
+    !isUnset('COURSES_PORT') && asText(raw.COURSES_PORT) === (asText(raw.PORT) ?? '3102');
+  if (isUnset('COURSES_ORIGIN') && sharesPort) {
+    env.COURSES_ORIGIN = external;
+  }
+
+  return env;
 }

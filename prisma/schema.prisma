@@ -331,3 +331,20 @@ model Deliverable {
   @@index([userId, submittedAt])
   @@map("deliverables")
 }
+
+/// Course package files, when STORAGE_DRIVER=postgres.
+///
+/// The same key space as the S3 driver — `courses/{id}/{version}/{path}` — so
+/// the two are interchangeable and nothing above StorageService knows which is
+/// in use. Written once per version and never updated, like an object in a
+/// bucket. A whole course is a few hundred KB, which is why this is reasonable
+/// at all; it exists for hosts where an object store would cost an account and
+/// a card on file.
+model StoredObject {
+  key         String   @id
+  contentType String   @map("content_type")
+  body        Bytes
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("stored_objects")
+}

@@ -19,14 +19,49 @@ import type { PublishedVersions } from './published-versions.js';
  * deliberately: two implementations that disagree would mean a course works in
  * development and breaks in production, or the reverse.
  *
- * A separate listener rather than a route on the API, because a *different
- * port is not a different origin for cookies* — they ignore ports. In
- * production this is a different hostname (courses.bud.example); in development
- * it is 127.0.0.1 against the shell's localhost, which differ by host.
+ * A separate Fastify instance rather than a route on the API, so none of the
+ * API's plugins — helmet's headers, CORS, the rate limiter, multipart — ever
+ * touch a course response, and this file's CSP is the only policy a course gets.
+ *
+ * Normally it also has its own listener: a *different port is not a different
+ * origin for cookies*, so in production it sits on its own hostname. It can
+ * instead share the API's port (COURSES_PORT = PORT), for hosts that expose
+ * only one. That is still isolated where it matters — the thing course code
+ * must not share an origin with is the *shell*, whose session cookie lives on
+ * the app's origin — and main.ts documents why that holds.
  */
+
+/**
+ * The sandbox every course document runs in. Must match the player iframe's
+ * `sandbox` attribute (Bud - frontend CoursePlayer.tsx) flag for flag: tighter
+ * breaks courses in the player, looser is a hole. Never `allow-same-origin`.
+ */
+export const COURSE_SANDBOX_FLAGS = 'allow-scripts allow-forms allow-modals';
 
 /** `/{courseId}/{version}/{path}` — the storage prefix, exactly. */
 const COURSE_PATH = /^\/([a-z0-9-]+)\/([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\/(.+)$/;
+
+/**
+ * Whether a request URL is course content rather than an API call.
+ *
+ * Decides where a request goes when course content shares the API's port (see
+ * main.ts). It is safe to check this first because the two shapes cannot
+ * overlap: a course path's second segment is always a version (`1.0.0`), no
+ * API route has one there, and a course slug cannot contain the dots a version
+ * needs. The e2e suite holds every API route in the OpenAPI document to that.
+ *
+ * Parses the URL the same way the course handler does, dot segments and all,
+ * so the two can never disagree about what a path is.
+ */
+export function isCoursePath(url: string): boolean {
+  let pathname: string;
+  try {
+    pathname = new URL(url, 'http://localhost').pathname;
+  } catch {
+    return false;
+  }
+  return COURSE_PATH.test(pathname);
+}
 
 export function buildCoursesServer(
   storage: StorageService,
@@ -48,8 +83,17 @@ export function buildCoursesServer(
    * `connect-src 'none'` is the one worth noticing: a course cannot make network
    * requests at all, so it cannot exfiltrate what a learner types. Its only way
    * out is the bridge.
+   *
+   * `sandbox` makes every course document opaque-origin *however it is
+   * reached*, not only inside the player's sandboxed iframe. Without it, a
+   * document opened directly runs on whatever origin served it — and behind
+   * the shell's /api proxy, that is the shell's own origin, where course
+   * JavaScript could open a same-origin window and act as the learner. The
+   * flags are exactly the player iframe's (CoursePlayer.tsx), so a course
+   * behaves identically in both, and neither grants allow-same-origin.
    */
   const csp = [
+    `sandbox ${COURSE_SANDBOX_FLAGS}`,
     `default-src 'none'`,
     `script-src ${coursesOrigin} ${appOrigin} 'unsafe-inline'`,
     `style-src ${coursesOrigin} 'unsafe-inline' https://fonts.googleapis.com`,

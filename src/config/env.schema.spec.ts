@@ -125,3 +125,143 @@ describe('validateEnv', () => {
     expect(message).toContain('S3_BUCKET');
   });
 });
+
+describe('STORAGE_DRIVER', () => {
+  const { S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, ...withoutS3 } = baseEnv;
+  void [S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY];
+
+  it('defaults to s3, and then requires every S3 setting', () => {
+    let message = '';
+    try {
+      validateEnv({ ...withoutS3 });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    for (const key of ['S3_ENDPOINT', 'S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY']) {
+      expect(message).toContain(`${key} is required when STORAGE_DRIVER is s3`);
+    }
+  });
+
+  it('needs no S3 settings at all when files live in Postgres', () => {
+    const env = validateEnv({ ...withoutS3, STORAGE_DRIVER: 'postgres' });
+
+    expect(env.STORAGE_DRIVER).toBe('postgres');
+    expect(env.S3_BUCKET).toBeUndefined();
+  });
+
+  it('treats an empty S3 variable as missing, not as a value', () => {
+    expect(() => validateEnv({ ...baseEnv, S3_BUCKET: '' })).toThrowError(/S3_BUCKET is required/);
+  });
+
+  it('rejects a driver it does not know', () => {
+    expect(() => validateEnv({ ...baseEnv, STORAGE_DRIVER: 'gcs' })).toThrowError(/STORAGE_DRIVER/);
+  });
+});
+
+/**
+ * On Render, the service's own address is only known once it exists — a taken
+ * name gets a suffix — so the origins that are that address default to it.
+ */
+describe('origins from RENDER_EXTERNAL_URL', () => {
+  const { API_ORIGIN, COURSES_ORIGIN, ...withoutOrigins } = baseEnv;
+  void [API_ORIGIN, COURSES_ORIGIN];
+  const render = 'https://bud-api-x7k2.onrender.com';
+
+  it('fills both origins when course content shares the port', () => {
+    const env = validateEnv({
+      ...withoutOrigins,
+      RENDER_EXTERNAL_URL: render,
+      PORT: '10000',
+      COURSES_PORT: '10000',
+    });
+
+    expect(env.API_ORIGIN).toBe(render);
+    expect(env.COURSES_ORIGIN).toBe(render);
+  });
+
+  it('fills only the API origin when courses have their own listener', () => {
+    // A separate listener is a separate address, which this variable does not
+    // describe — so COURSES_ORIGIN is still required.
+    expect(() =>
+      validateEnv({
+        ...withoutOrigins,
+        RENDER_EXTERNAL_URL: render,
+        PORT: '10000',
+        COURSES_PORT: '10001',
+      }),
+    ).toThrowError(/COURSES_ORIGIN/);
+  });
+
+  it('compares against the default port when PORT is unset', () => {
+    const env = validateEnv({
+      ...withoutOrigins,
+      RENDER_EXTERNAL_URL: render,
+      COURSES_PORT: '3102',
+    });
+
+    expect(env.COURSES_ORIGIN).toBe(render);
+  });
+
+  it('never overrides a value that was set explicitly', () => {
+    const env = validateEnv({
+      ...baseEnv,
+      RENDER_EXTERNAL_URL: render,
+      PORT: '10000',
+      COURSES_PORT: '10000',
+    });
+
+    expect(env.API_ORIGIN).toBe(baseEnv.API_ORIGIN);
+    expect(env.COURSES_ORIGIN).toBe(baseEnv.COURSES_ORIGIN);
+  });
+
+  it('derives nothing off Render', () => {
+    expect(() =>
+      validateEnv({ ...withoutOrigins, PORT: '10000', COURSES_PORT: '10000' }),
+    ).toThrowError(/API_ORIGIN/);
+  });
+
+  it('still refuses a courses origin equal to the app origin', () => {
+    // The fallback must not be a way around the isolation rule.
+    expect(() =>
+      validateEnv({
+        ...withoutOrigins,
+        APP_ORIGIN: render,
+        RENDER_EXTERNAL_URL: render,
+        PORT: '10000',
+        COURSES_PORT: '10000',
+      }),
+    ).toThrowError(/COURSES_ORIGIN must differ from APP_ORIGIN/);
+  });
+});
+
+describe('GitHub sign-in and the course origin', () => {
+  const oauth = { GITHUB_CLIENT_ID: 'id', GITHUB_CLIENT_SECRET: 'secret' };
+
+  it('refuses GitHub sign-in when its callback host also serves course content', () => {
+    // The callback sets the session cookie on API_ORIGIN's host — here the
+    // host that serves author-controlled course HTML.
+    expect(() =>
+      validateEnv({
+        ...baseEnv,
+        ...oauth,
+        API_ORIGIN: 'https://bud-api.onrender.com',
+        COURSES_ORIGIN: 'https://bud-api.onrender.com',
+      }),
+    ).toThrowError(/GitHub sign-in would set the session cookie on the host that serves course/);
+  });
+
+  it('allows it when the two are different hosts', () => {
+    expect(() => validateEnv({ ...baseEnv, ...oauth })).not.toThrow();
+  });
+
+  it('does not care where course content is served when GitHub sign-in is off', () => {
+    expect(() =>
+      validateEnv({
+        ...baseEnv,
+        API_ORIGIN: 'https://bud-api.onrender.com',
+        COURSES_ORIGIN: 'https://bud-api.onrender.com',
+      }),
+    ).not.toThrow();
+  });
+});

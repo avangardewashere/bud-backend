@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   // ordinary classes, and TypeScript still checks the wiring.
   const config = new AppConfigService(new ConfigService<Env, true>(validateEnv(process.env)));
   const prisma = new PrismaService(config);
-  const storage = new StorageService(config);
+  const storage = new StorageService(config, prisma);
   const ingest = new IngestService(prisma, new CourseSpecService(), storage);
 
   try {

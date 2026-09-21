@@ -1,9 +1,12 @@
 import 'reflect-metadata';
 
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+
 import { Logger as NestLogger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import type { FastifyServerFactoryHandler, FastifyServerOptions } from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import fastifyHelmet from '@fastify/helmet';
 import fastifyMultipart from '@fastify/multipart';
@@ -13,15 +16,45 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { ErrorReporter } from './common/errors/error-reporter.js';
 import { AppConfigService } from './config/index.js';
-import { buildCoursesServer } from './course-serving/courses-server.js';
+import { buildCoursesServer, isCoursePath } from './course-serving/courses-server.js';
 import { PublishedVersions } from './course-serving/published-versions.js';
 import { StorageService } from './storage/storage.service.js';
 import { componentSchemas } from './openapi/components.js';
+
+/**
+ * Set only when course content shares the API's port. Until then — and always,
+ * when courses have their own listener — every request goes to the API.
+ */
+let routeCourse: ((req: IncomingMessage, res: ServerResponse) => void) | undefined;
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
+      // One HTTP server in front of two Fastify instances. Each request goes to
+      // exactly one of them, whole: the courses server's CSP and nothing else,
+      // or the API with its plugins. Neither sees the other's traffic.
+      serverFactory: (handleApi: FastifyServerFactoryHandler, options: FastifyServerOptions) => {
+        const server = createServer((req, res) => {
+          if (routeCourse && isCoursePath(req.url ?? '/')) {
+            routeCourse(req, res);
+            return;
+          }
+          handleApi(req, res);
+        });
+
+        // Fastify applies its timeouts only to servers it creates itself, so a
+        // factory silently falls back to Node's: a 5 s keep-alive instead of
+        // 72 s. Behind a proxy that pools connections (Render's, Caddy's), the
+        // proxy then reuses a socket just as Node closes it, and a request —
+        // a progress save, a sign-in — fails as an intermittent 502. Render's
+        // own guidance is 120 s, with the header timeout above it.
+        server.keepAliveTimeout = 120_000;
+        server.headersTimeout = 121_000;
+        server.requestTimeout = options.requestTimeout ?? 0;
+        server.setTimeout(options.connectionTimeout ?? 0);
+        return server;
+      },
       // Behind Caddy / a load balancer, so client IPs come from X-Forwarded-For.
       // Rate limiting and session records depend on getting this right.
       trustProxy: true,
@@ -51,6 +84,18 @@ async function bootstrap(): Promise<void> {
   });
 
   await fastify.register(fastifyCookie);
+
+  // Nothing the API returns is safe to cache: it is per-user or it changes.
+  // Said outright rather than left to defaults, because a proxy in front may
+  // cache whatever it is not told not to — Vercel's rewrite proxy, for one,
+  // caches upstream responses by default, and would then hand one learner's
+  // dashboard to the next person to ask. A route that knows better sets its
+  // own header, and this leaves it alone.
+  fastify.addHook('onSend', async (_request, reply) => {
+    if (!reply.hasHeader('cache-control')) {
+      reply.header('cache-control', 'no-store');
+    }
+  });
 
   // Course package uploads. The per-file cap is enforced again in the route,
   // because fastify truncates at the limit rather than refusing outright.
@@ -118,18 +163,46 @@ async function bootstrap(): Promise<void> {
 
   const port = config.get('PORT');
   const host = config.get('HOST');
+  const logger = new NestLogger('Bootstrap');
+
+  // Course content. Unset in development while the shell serves courses itself.
+  const coursesPort = config.get('COURSES_PORT');
+
+  // Shared port: for hosts that give a service one public port (Render's free
+  // tier). Course content is then served from the API's own hostname.
+  //
+  // What must never happen is course JavaScript running with the *shell's*
+  // origin, where the session lives. Two things hold that line here:
+  //
+  // - Every course response carries a CSP `sandbox` directive, so a course
+  //   document is opaque-origin however it is reached. That matters because
+  //   the shell proxies /api to this host: /api/{course}/{version}/page.html on
+  //   the shell's origin arrives here as a course path, and without the
+  //   sandbox that document would run as the shell. (The shell's rewrite also
+  //   forwards only the API's own prefixes — defence in depth, not the fix.)
+  // - The session cookie belongs to the shell's origin, because browsers reach
+  //   the API only through that proxy; the env schema refuses the one
+  //   configuration that would set it here (GitHub sign-in with its callback
+  //   on this host).
+  if (coursesPort && coursesPort === port) {
+    const courses = buildCoursesServer(app.get(StorageService), config, app.get(PublishedVersions));
+    // routing() needs the instance's routes compiled, which ready() does.
+    await courses.ready();
+    routeCourse = (req, res) => courses.routing(req, res);
+  }
 
   await app.listen({ port, host });
-
-  const logger = new NestLogger('Bootstrap');
   logger.log(`Bud API listening on http://${host}:${port} [${config.get('NODE_ENV')}]`);
 
-  // Course content on its own origin. Separate listener, not a route: a
-  // different port is not a different origin as far as cookies are concerned,
-  // and this boundary is what keeps author-controlled JavaScript away from the
-  // session. Unset in development while the shell serves courses itself.
-  const coursesPort = config.get('COURSES_PORT');
-  if (coursesPort) {
+  if (routeCourse) {
+    logger.log(`Course content served on the same port, for paths shaped /{course}/{version}/…`);
+  }
+
+  // Course content on its own listener: the normal arrangement, and the one to
+  // prefer wherever a host allows it. A different port is not a different
+  // origin as far as cookies are concerned, so in production this listener
+  // sits on its own hostname.
+  if (coursesPort && coursesPort !== port) {
     // The CSP and the bridge tag are built from COURSES_ORIGIN, so if that does
     // not actually point at this listener the policy names an origin nothing is
     // served from — and the course half-works in a way that is painful to
