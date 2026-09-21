@@ -57,15 +57,29 @@ describe.skipIf(!enabled)('course serving', () => {
     expect(response.headers.get('content-type')).toMatch(/text\/html/);
   });
 
-  it('injects the bridge after the charset meta, since worksheets have no head', async () => {
+  it('loads the bridge before any of the course’s own scripts', async () => {
     const html = await (await fetch(`${base}${worksheet}`)).text();
 
-    const charsetAt = html.search(/<meta[^>]+charset/i);
     const bridgeAt = html.indexOf('/bridge.js');
+    // The first <script> that is not the bridge: the course's own code, which
+    // calls window.storage and needs the bridge to have defined it already.
+    const courseScriptAt = html.search(/<script(?![^>]*bridge\.js)[\s>]/i);
 
     expect(bridgeAt).toBeGreaterThan(-1);
-    // A charset declared late is a charset ignored.
-    expect(charsetAt).toBeLessThan(bridgeAt);
+    if (courseScriptAt !== -1) {
+      expect(bridgeAt).toBeLessThan(courseScriptAt);
+    }
+  });
+
+  it('declares the charset in the header, so where the bridge lands cannot affect it', async () => {
+    // This used to assert that the bridge came after <meta charset>. That only
+    // held for worksheets with no <head> — the real Docker ones — and failed
+    // the first time CI ran, against a fixture with a proper head. It was also
+    // asserting the wrong thing: an HTTP charset overrides the meta, so the
+    // meta's position has no effect on how the page decodes.
+    const response = await fetch(`${base}${worksheet}`);
+
+    expect(response.headers.get('content-type')).toMatch(/charset=utf-8/i);
   });
 
   it('injects the bridge exactly once', async () => {
