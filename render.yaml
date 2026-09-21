@@ -1,0 +1,54 @@
+# Render Blueprint — Bud's API on Render's free plan.
+#
+# The $0 arrangement (Planning/Deploy-Guide.md): the web app on Vercel, which
+# proxies /api to this service; Postgres on Neon; course files in that same
+# Postgres. Render's free web service gives one public port, so course content
+# shares it — routed by path, isolated by construction; see src/main.ts.
+#
+# Values marked `sync: false` are asked for once, when the Blueprint is created
+# in the Render dashboard, and are never stored in this repo.
+
+services:
+  - type: web
+    name: bud-api
+    runtime: docker
+    # Must be explicit: a service with no plan is created on a PAID instance.
+    plan: free
+    # Beside Vercel's default function region (iad1) and Neon's us-east-1.
+    # Cannot be changed after creation.
+    region: virginia
+    dockerfilePath: ./docker/Dockerfile
+    dockerContext: .
+    # /health, not /ready. Render probes continuously while the instance is
+    # up, and /ready queries Postgres: probing it would keep Neon from scaling
+    # to zero and could spend its free compute hours within the month. The
+    # shell's login page also calls /health to wake the service. It must stay
+    # database-free; health.controller.spec.ts enforces that.
+    healthCheckPath: /health
+    # Deploy a commit only once every CI check on it has passed — including
+    # ci.yml's migrate job, which applies migrations to Neon first. So new code
+    # never runs against an old schema, and a broken commit never spends the
+    # free build minutes.
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render forwards public traffic to this one port.
+      - key: PORT
+        value: '10000'
+      # Course content on the same port. API_ORIGIN and COURSES_ORIGIN then
+      # both default to this service's own address, RENDER_EXTERNAL_URL.
+      - key: COURSES_PORT
+        value: '10000'
+      - key: COOKIE_SECURE
+        value: 'true'
+      - key: STORAGE_DRIVER
+        value: postgres
+
+      # The Vercel app's address, e.g. https://bud.vercel.app — no trailing slash.
+      - key: APP_ORIGIN
+        sync: false
+      # Neon, the "Pooled connection" string, with sslmode=verify-full.
+      # (Migrations use the direct one, from a GitHub secret — see ci.yml.)
+      - key: DATABASE_URL
+        sync: false

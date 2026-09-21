@@ -51,9 +51,11 @@ EXPOSE 3102
 
 # Compose and orchestrators use /health; this is for plain `docker run`.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:3102/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3102)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 ENTRYPOINT ["/sbin/tini", "--"]
 # Migrations are NOT run here. They are a separate step in the deploy pipeline
 # (Tech-Information.md section 10, rule 3): never auto-migrate on boot in prod.
+# On the free Render plan, where a container starts on every wake from sleep,
+# that is what makes it matter: ci.yml's migrate job runs them once per deploy.
 CMD ["node", "dist/main.js"]
