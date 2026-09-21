@@ -121,6 +121,19 @@ describe.skipIf(!enabled)('course serving', () => {
       expect(response.status).toBe(415);
     });
 
+    it('refuses a version that is not the one being served', async () => {
+      // Storage keeps every version so a rollback is a pointer change, but only
+      // the current one is public. Without this the origin handed out any
+      // version ever uploaded — including drafts — to anyone who guessed a
+      // slug and a version number, so unpublishing a course 404'd the catalog
+      // while its files stayed readable.
+      const response = await fetch(`${base}/docker-fundamentals/0.0.1/index.html`);
+
+      // 404 rather than 403: a version nobody may read should look the same as
+      // one that never existed.
+      expect(response.status).toBe(404);
+    });
+
     it('404s an unknown course, version or file', async () => {
       for (const path of [
         '/no-such-course/1.0.0/index.html',

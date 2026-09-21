@@ -14,6 +14,8 @@ import { AppModule } from './app.module.js';
 import { ErrorReporter } from './common/errors/error-reporter.js';
 import { AppConfigService } from './config/index.js';
 import { buildCoursesServer } from './course-serving/courses-server.js';
+import { PublishedVersions } from './course-serving/published-versions.js';
+import { PrismaService } from './prisma/prisma.service.js';
 import { StorageService } from './storage/storage.service.js';
 import { componentSchemas } from './openapi/components.js';
 
@@ -143,7 +145,11 @@ async function bootstrap(): Promise<void> {
       );
     }
 
-    const courses = buildCoursesServer(app.get(StorageService), config);
+    const courses = buildCoursesServer(
+      app.get(StorageService),
+      config,
+      new PublishedVersions(app.get(PrismaService)),
+    );
     await courses.listen({ port: coursesPort, host });
     logger.log(`Course content listening on http://${host}:${coursesPort}`);
   }

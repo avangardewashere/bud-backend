@@ -8,6 +8,7 @@ import { RolesGuard } from './auth/guards/roles.guard.js';
 import { SessionGuard } from './auth/guards/session.guard.js';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { ErrorReporter } from './common/errors/error-reporter.js';
+import { sanitizeUrl } from './common/logging/sanitize-url.js';
 import { AppConfigModule, AppConfigService } from './config/index.js';
 import { CourseSpecModule } from './course-spec/course-spec.module.js';
 import { CoursesModule } from './courses/courses.module.js';
@@ -45,6 +46,20 @@ import { StorageModule } from './storage/index.js';
               'req.body.inviteToken',
             ],
             remove: true,
+          },
+          serializers: {
+            // pino-http logs req.url verbatim, which put the OAuth
+            // authorization code and CSRF state into every log line for
+            // /auth/github/callback. A code is exchangeable for an access
+            // token until it is used, and logs are read by more people and
+            // systems than the database is.
+            req(request: { url?: string; method?: string; id?: unknown }) {
+              return {
+                id: request.id,
+                method: request.method,
+                url: request.url ? sanitizeUrl(request.url) : request.url,
+              };
+            },
           },
           // Probes would otherwise dominate the log volume.
           autoLogging: {

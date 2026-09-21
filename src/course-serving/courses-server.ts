@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { AppConfigService } from '../config/app-config.service.js';
 import { contentTypeFor } from '../storage/content-types.js';
 import type { StorageService } from '../storage/storage.service.js';
+import type { PublishedVersions } from './published-versions.js';
 
 /**
  * Serves course content on its **own origin**, separate from both the shell and
@@ -30,6 +31,7 @@ const COURSE_PATH = /^\/([a-z0-9-]+)\/([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)
 export function buildCoursesServer(
   storage: StorageService,
   config: AppConfigService,
+  published: PublishedVersions,
 ): FastifyInstance {
   const appOrigin = config.get('APP_ORIGIN');
   const coursesOrigin = config.get('COURSES_ORIGIN');
@@ -96,6 +98,16 @@ export function buildCoursesServer(
       // Serving a type the course spec does not allow would mean serving
       // something the validator never inspected.
       return reply.code(415).type('text/plain').send('unsupported type');
+    }
+
+    // Only the version the catalog is serving. Without this the origin handed
+    // out any version ever uploaded to anyone who guessed a slug and a version
+    // number, so unpublishing a course 404'd the catalog while its files stayed
+    // readable — a withdrawal that withdrew nothing.
+    if (!(await published.isPublic(courseId, version))) {
+      // 404 rather than 403: a draft should not be distinguishable from a
+      // course that never existed, which is the same rule the catalog follows.
+      return reply.code(404).type('text/plain').send('not found');
     }
 
     const key = `courses/${courseId}/${version}/${decoded}`;

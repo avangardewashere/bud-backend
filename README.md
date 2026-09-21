@@ -233,6 +233,24 @@ is a manual dispatch with an older `sha-` tag.
 
 ---
 
+## Security review findings
+
+Reviewed before the first deploy. Two were fixed; the third is a documented
+limitation of one configuration.
+
+| Finding | Status |
+|---|---|
+| **OAuth authorization codes were written to the logs.** `pino-http` logs `req.url` verbatim, so `/auth/github/callback?code=…&state=…` put a credential exchangeable for an access token into every log line — and logs reach more people and systems than the database does | **Fixed.** A request serializer redacts the values of sensitive query parameters while keeping their names, so `?cursor=` and `?limit=` still make list endpoints debuggable |
+| **Unpublished course content stayed readable.** The catalog 404s a draft, but the content origin served any version ever uploaded to anyone who guessed a slug and a version number. Unpublishing hid a course while its files stayed public — a withdrawal that withdrew nothing | **Fixed.** The origin now serves only the version the catalog is serving, cached for 30s so an asset request is not a database round trip. A rollback is still a pointer change, because storage keeps every version |
+| **`POST /auth/register` distinguishes a taken email** with a 409 | **Documented, not fixed.** Unreachable under `SIGNUP_MODE=invite_only` (the default and the deployed setting): an invite is bound to an email, so anyone who can reach that path already knows the address. Under `SIGNUP_MODE=open` it is a real enumeration vector, and the fix is to answer identically and send mail — which needs the mail flow that does not exist yet. **Do not set `SIGNUP_MODE=open` until it does.** |
+
+Two things the review confirmed rather than changed: no endpoint takes a
+user-supplied URL and fetches it, so there is no SSRF surface; and every `/me`
+route scopes to the session's own user id, so there is no object reference to
+tamper with.
+
+---
+
 ## Known gaps (intentional for Phase 0)
 
 - ~~GitHub OAuth~~ — **done.** `GET /auth/github` and its callback. Unconfigured,
