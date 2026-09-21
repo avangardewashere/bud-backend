@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-import type { Course, CourseVersion } from '@prisma/client';
+import { type Course, type CourseVersion, Prisma } from '@prisma/client';
 import type { Buffer } from 'node:buffer';
 
 import { extractFiles } from '../course-spec/archive.js';
@@ -79,9 +79,19 @@ export class IngestService {
 
       return { report, course, version, filesStored: stored };
     } catch (cause) {
-      // Never leave a half-written version behind: the prefix is unique to this
-      // upload, so deleting it cannot touch anything else.
-      const removed = await this.storage.deletePrefix(prefix).catch(() => 0);
+      // Another upload of this same version got there first — a double submit
+      // passes assertVersionIsNew twice, and the loser fails on the unique
+      // (course, version) row. Both wrote identical keys, so cleaning up here
+      // would delete the winner's files out from under a published version.
+      if (cause instanceof Prisma.PrismaClientKnownRequestError && cause.code === 'P2002') {
+        this.logger.warn(`Ingest of ${manifest.id}@${manifest.version} lost a race; keeping files`);
+        throw cause;
+      }
+
+      // Never leave a half-written version behind. The trailing slash matters:
+      // without it, cleaning up 1.0.0 would also match every key of 1.0.0-rc.1
+      // or 1.0.01 — other versions, possibly the one being served.
+      const removed = await this.storage.deletePrefix(`${prefix}/`).catch(() => 0);
       this.logger.error(
         { err: cause },
         `Ingest of ${manifest.id}@${manifest.version} failed; removed ${removed} stored objects`,
