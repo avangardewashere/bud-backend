@@ -11,7 +11,17 @@ import { ApiClient, apiIsUp, COURSES_BASE, ensureTestUser } from './client.js';
  * path, not just the function that builds them.
  *
  * Skips unless E2E_COURSES_BASE is set, because in local development the shell
- * serves courses itself and the two would fight over the port.
+ * serves courses itself and the two would fight over the port. CI sets
+ * COURSES_PORT and points this at the backend's own listener.
+ *
+ * To run it locally, start a second instance on spare ports and aim at that:
+ *
+ *   PORT=3112 COURSES_PORT=3113 COURSES_ORIGIN=http://127.0.0.1:3113 npm run start
+ *   E2E_COURSES_BASE=http://127.0.0.1:3113 npm run test:e2e
+ *
+ * Do not point it at the shell's dev courses server. That is a stand-in with
+ * its own status codes and no-store caching, so three of these fail against it
+ * for reasons that have nothing to do with this code.
  */
 
 const enabled = Boolean(COURSES_BASE) && (await apiIsUp());
