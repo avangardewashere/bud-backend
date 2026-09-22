@@ -38,3 +38,7 @@ uploads/
 # prisma
 prisma/*.db
 prisma/*.db-journal
+.neon
+
+# Neon CLI output: production credentials, never committed
+infra/neon/.env*
