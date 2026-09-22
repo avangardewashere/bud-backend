@@ -1,9 +1,10 @@
 # Render Blueprint — Bud's API on Render's free plan.
 #
 # The $0 arrangement (Planning/Deploy-Guide.md): the web app on Vercel, which
-# proxies /api to this service; Postgres on Neon; course files in that same
-# Postgres. Render's free web service gives one public port, so course content
-# shares it — routed by path, isolated by construction; see src/main.ts.
+# proxies /api to this service; Postgres on Neon; course files in Neon Object
+# Storage (5 GB free, S3-compatible — infra/neon/neon.ts declares the bucket).
+# Render's free web service gives one public port, so course content shares it
+# — routed by path, isolated by construction; see src/main.ts.
 #
 # Values marked `sync: false` are asked for once, when the Blueprint is created
 # in the Render dashboard, and are never stored in this repo.
@@ -14,9 +15,10 @@ services:
     runtime: docker
     # Must be explicit: a service with no plan is created on a PAID instance.
     plan: free
-    # Beside Vercel's default function region (iad1) and Neon's us-east-1.
+    # Beside the Neon project (aws-us-east-2, Ohio): every API request makes
+    # several database and storage round trips, and only one hop to Vercel.
     # Cannot be changed after creation.
-    region: virginia
+    region: ohio
     dockerfilePath: ./docker/Dockerfile
     dockerContext: .
     # /health, not /ready. Render probes continuously while the instance is
@@ -42,8 +44,12 @@ services:
         value: '10000'
       - key: COOKIE_SECURE
         value: 'true'
+      # Course files in the Neon bucket, through the S3 driver. Neon requires
+      # path-style addressing, which is S3_FORCE_PATH_STYLE's default.
       - key: STORAGE_DRIVER
-        value: postgres
+        value: s3
+      - key: S3_BUCKET
+        value: uploads
 
       # The Vercel app's address, e.g. https://bud.vercel.app — no trailing slash.
       - key: APP_ORIGIN
@@ -51,4 +57,15 @@ services:
       # Neon, the "Pooled connection" string, with sslmode=verify-full.
       # (Migrations use the direct one, from a GitHub secret — see ci.yml.)
       - key: DATABASE_URL
+        sync: false
+      # Neon Object Storage, under the names Neon gives them — copy all four
+      # from infra/neon/.env.local. The API maps them onto its S3 settings
+      # (env.schema.ts), and only as a complete set.
+      - key: AWS_ENDPOINT_URL_S3
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
         sync: false

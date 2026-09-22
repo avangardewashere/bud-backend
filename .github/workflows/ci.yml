@@ -48,22 +48,23 @@ jobs:
     name: e2e (${{ matrix.mode }})
     runs-on: ubuntu-latest
     needs: checks
-    # The two arrangements Bud actually runs in:
-    # - self-hosted: course content on its own listener, files in S3 (MinIO);
-    # - free hosting (render.yaml): content sharing the API's one public port,
-    #   files in Postgres.
-    # Each is tested whole, the way it is deployed.
+    # Both ways of serving course content, and both places files can live:
+    # - shared port, S3: the free deploy exactly (render.yaml) — content on the
+    #   API's one public port, files in an S3 bucket (Neon Object Storage there,
+    #   MinIO here);
+    # - own listener, Postgres: the self-hosted listener, with the database
+    #   storage driver, so neither goes untested.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - mode: own listener, S3
-            courses_port: '3101'
-            courses_origin: http://127.0.0.1:3101
-            storage_driver: s3
-          - mode: shared port, Postgres
+          - mode: shared port, S3
             courses_port: '3102'
             courses_origin: http://127.0.0.1:3102
+            storage_driver: s3
+          - mode: own listener, Postgres
+            courses_port: '3101'
+            courses_origin: http://127.0.0.1:3101
             storage_driver: postgres
     services:
       postgres:

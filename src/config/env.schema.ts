@@ -94,8 +94,10 @@ export const envSchema = z
     /**
      * Where course package files live.
      *
-     * - `s3` (default): any S3-compatible store — MinIO locally, R2 or S3 in
-     *   production. The S3_* variables below are then required.
+     * - `s3` (default): any S3-compatible store — MinIO locally, Neon Object
+     *   Storage, R2 or S3 in production. The S3_* variables below are then
+     *   required, or the AWS SDK's standard names as a set (see
+     *   withPlatformDefaults).
      * - `postgres`: a table in the main database. For free hosting with no
      *   object store: a whole course is a few hundred KB, and this saves an
      *   account, a card on file and a download cap. See storage/.
@@ -225,7 +227,9 @@ function missingS3Settings(env: Record<string, unknown>): string[] {
 }
 
 /**
- * Origins a host tells us about, used only where nothing was set explicitly.
+ * Values a host or a standard provides, used only where nothing was set
+ * explicitly: S3 settings under the AWS SDK's standard names, and the origins
+ * Render tells a service about.
  *
  * Render gives every web service RENDER_EXTERNAL_URL (https://<name>.onrender.com)
  * at runtime. The service's own address is exactly what API_ORIGIN is, and —
@@ -236,13 +240,30 @@ function missingS3Settings(env: Record<string, unknown>): string[] {
  * An explicit value always wins, and nothing is derived off Render.
  */
 function withPlatformDefaults(raw: Record<string, unknown>): Record<string, unknown> {
-  const external = raw.RENDER_EXTERNAL_URL;
-  if (typeof external !== 'string' || external === '') {
-    return raw;
-  }
-
   const isUnset = (key: string) => raw[key] === undefined || raw[key] === '';
   const env = { ...raw };
+
+  // S3 settings under the AWS SDK's standard names — the names Neon Object
+  // Storage hands out (`neon env pull`), and most other S3-compatible stores.
+  // Taken only as a complete set, and only when no S3_* connection setting is
+  // present: mixing one source's endpoint with another's keys (a local MinIO
+  // endpoint with production credentials) must be impossible. S3_BUCKET has
+  // no standard name, so it is always set explicitly.
+  const s3Connection = ['S3_ENDPOINT', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'];
+  const awsConnection = ['AWS_ENDPOINT_URL_S3', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'];
+  if (s3Connection.every(isUnset) && awsConnection.every((key) => !isUnset(key))) {
+    env.S3_ENDPOINT = raw.AWS_ENDPOINT_URL_S3;
+    env.S3_ACCESS_KEY_ID = raw.AWS_ACCESS_KEY_ID;
+    env.S3_SECRET_ACCESS_KEY = raw.AWS_SECRET_ACCESS_KEY;
+    if (isUnset('S3_REGION') && !isUnset('AWS_REGION')) {
+      env.S3_REGION = raw.AWS_REGION;
+    }
+  }
+
+  const external = raw.RENDER_EXTERNAL_URL;
+  if (typeof external !== 'string' || external === '') {
+    return env;
+  }
 
   if (isUnset('API_ORIGIN')) {
     env.API_ORIGIN = external;

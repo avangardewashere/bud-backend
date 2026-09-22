@@ -265,3 +265,53 @@ describe('GitHub sign-in and the course origin', () => {
     ).not.toThrow();
   });
 });
+
+/**
+ * Neon Object Storage (and the AWS SDK's own convention) name S3 settings
+ * AWS_ENDPOINT_URL_S3 / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION.
+ */
+describe('S3 settings under the AWS standard names', () => {
+  const { S3_ENDPOINT, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, ...withoutS3 } = baseEnv;
+  void [S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY];
+  const aws = {
+    AWS_ENDPOINT_URL_S3: 'https://br-x.storage.c-6.us-east-2.aws.neon.tech',
+    AWS_ACCESS_KEY_ID: 'neon-key',
+    AWS_SECRET_ACCESS_KEY: 'neon-secret',
+    AWS_REGION: 'us-east-2',
+  };
+
+  it('takes the full AWS set when no S3_* connection setting is given', () => {
+    const env = validateEnv({ ...withoutS3, S3_BUCKET, ...aws });
+
+    expect(env.S3_ENDPOINT).toBe(aws.AWS_ENDPOINT_URL_S3);
+    expect(env.S3_ACCESS_KEY_ID).toBe('neon-key');
+    expect(env.S3_SECRET_ACCESS_KEY).toBe('neon-secret');
+    expect(env.S3_REGION).toBe('us-east-2');
+  });
+
+  it('never mixes: any S3_* connection setting means the AWS set is ignored', () => {
+    // A local MinIO endpoint must not end up paired with production keys.
+    expect(() =>
+      validateEnv({ ...withoutS3, S3_BUCKET, S3_ENDPOINT: 'http://localhost:9000', ...aws }),
+    ).toThrowError(/S3_ACCESS_KEY_ID is required/);
+  });
+
+  it('ignores an incomplete AWS set rather than half-using it', () => {
+    const { AWS_SECRET_ACCESS_KEY, ...partial } = aws;
+    void AWS_SECRET_ACCESS_KEY;
+
+    expect(() => validateEnv({ ...withoutS3, S3_BUCKET, ...partial })).toThrowError(
+      /S3_ENDPOINT is required/,
+    );
+  });
+
+  it('keeps an explicit S3_REGION over AWS_REGION', () => {
+    const env = validateEnv({ ...withoutS3, S3_BUCKET, S3_REGION: 'auto', ...aws });
+
+    expect(env.S3_REGION).toBe('auto');
+  });
+
+  it('still needs the bucket named explicitly — there is no standard name for it', () => {
+    expect(() => validateEnv({ ...withoutS3, ...aws })).toThrowError(/S3_BUCKET is required/);
+  });
+});
