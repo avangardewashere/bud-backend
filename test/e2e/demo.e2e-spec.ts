@@ -39,6 +39,14 @@ describe.skipIf(!demoEnabled)('the public demo', () => {
     dashboard = (await api.get<Dashboard>('/me/dashboard')).body;
   });
 
+  it('tells the sign-in screen that the demo exists', async () => {
+    // Otherwise the shell has to guess, and a button that 404s is worse than
+    // no button.
+    const providers = await new ApiClient().get<{ demo: boolean }>('/auth/providers');
+
+    expect(providers.body.demo).toBe(true);
+  });
+
   it('signs a visitor in with no credentials at all', async () => {
     const me = await api.get<{ user: { email: string; role: string } }>('/me');
 
@@ -89,16 +97,21 @@ describe.skipIf(!demoEnabled)('the public demo', () => {
 
   it('keeps what a visitor does while they are still using it', async () => {
     // Resetting under someone mid-tour would look like a bug, so it only
-    // happens once the demo has been idle.
-    const course = dashboard.courses[0];
-    const detail = await api.get<{ sessions: { key: string }[] }>(`/courses/${course.slug}`);
-    const untouched = detail.body.sessions.at(-1)!.key;
+    // happens once the demo has been idle. This suite shares one account that
+    // outlives a run, so it makes its own starting point rather than assuming
+    // one: reopen a session, then finish it again.
+    const slug = dashboard.courses[0].slug;
+    const detail = await api.get<{ sessions: { key: string }[] }>(`/courses/${slug}`);
+    const key = detail.body.sessions.at(-1)!.key;
 
-    await api.post(`/me/courses/${course.slug}/sessions/${untouched}/complete`);
+    await api.delete(`/me/courses/${slug}/sessions/${key}/complete`);
+    const before = (await api.get<Dashboard>('/me/dashboard')).body.courses[0].completedSessions;
+
+    await api.post(`/me/courses/${slug}/sessions/${key}/complete`);
     await api.post('/auth/demo');
 
     const after = await api.get<Dashboard>('/me/dashboard');
 
-    expect(after.body.courses[0].completedSessions).toBe(course.completedSessions + 1);
+    expect(after.body.courses[0].completedSessions).toBe(before + 1);
   });
 });

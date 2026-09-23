@@ -71,6 +71,8 @@ export class AuthController {
     return {
       password: true,
       github: this.github.enabled,
+      // So the shell shows a "try the demo" button only where the route exists.
+      demo: this.demo.enabled,
       /** invite_only and closed both mean "no self-service registration". */
       signupMode: this.config.get('SIGNUP_MODE'),
     };

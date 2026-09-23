@@ -91,5 +91,7 @@ export const errorSchema = z.object({
 export const authProvidersSchema = z.object({
   password: z.boolean(),
   github: z.boolean(),
+  /** A public demo account anyone can try, without credentials. */
+  demo: z.boolean(),
   signupMode: z.enum(['invite_only', 'open', 'closed']),
 });
