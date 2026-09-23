@@ -1,0 +1,24 @@
+<meta charset="utf-8">
+<title>There is a cover on this one</title>
+<h1>There is a cover on this one</h1>
+
+<p>
+  This session exists so the package it belongs to is a real course: it saves
+  through the bridge, the way every worksheet does.
+</p>
+
+<label for="note">Anything at all</label>
+<input id="note" type="text">
+
+<script>
+  const input = document.getElementById('note');
+  const KEY = 'cover-check:state';
+
+  window.storage.get(KEY).then((saved) => {
+    if (typeof saved === 'string') input.value = saved;
+  });
+
+  input.addEventListener('input', () => {
+    window.storage.set(KEY, input.value);
+  });
+</script>

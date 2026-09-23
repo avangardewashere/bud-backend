@@ -24,7 +24,7 @@ const realManifest = JSON.parse(
 
 interface ZipFileSpec {
   path: string;
-  content?: string;
+  content?: string | Buffer;
   /** Marks the entry as a symlink via its unix mode bits. */
   symlink?: boolean;
   /**
@@ -411,5 +411,39 @@ describe('CourseSpecService', () => {
         expect(r.message).toBeTruthy();
       }
     });
+  });
+});
+
+/**
+ * The fixture that exists because the other one does not have a cover.
+ *
+ * Read off disk exactly as shipped, bytes and all: the validator's job here is
+ * to keep saying yes to a package that CI ingests, publishes and then fetches
+ * the cover of over real HTTP. If this starts failing, that check goes with it.
+ */
+describe('the course package that has a cover', () => {
+  const service = new CourseSpecService();
+  const dir = fileURLToPath(new URL('../../test/fixtures/course-with-cover/', import.meta.url));
+  const manifest = JSON.parse(readFileSync(`${dir}bud.manifest.json`, 'utf8')) as CourseManifest;
+
+  it('validates, with no complaint about the cover', async () => {
+    const report = (
+      await service.validate(
+        await makeZip([
+          { path: 'bud.manifest.json', content: readFileSync(`${dir}bud.manifest.json`, 'utf8') },
+          { path: manifest.outline!, content: readFileSync(`${dir}${manifest.outline!}`, 'utf8') },
+          { path: manifest.cover!, content: readFileSync(`${dir}${manifest.cover!}`) },
+          ...manifest.sessions.map((session) => ({
+            path: session.entry,
+            content: readFileSync(`${dir}${session.entry}`, 'utf8'),
+          })),
+        ]),
+      )
+    ).report;
+
+    expect(report.results.filter((r) => r.severity === 'error')).toEqual([]);
+    expect(report.ok).toBe(true);
+    // The other fixture warns here; this one must not.
+    expect(find(report, 'cover_missing')).toBeUndefined();
   });
 });

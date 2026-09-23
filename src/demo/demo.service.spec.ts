@@ -32,7 +32,7 @@ function makeService() {
       findUnique: vi.fn().mockResolvedValue({ id: 'demo-user', email: 'demo@bud.local' }),
     },
     // No published course: reset does its deletes and stops.
-    course: { findFirst: vi.fn().mockResolvedValue(null) },
+    course: { findMany: vi.fn().mockResolvedValue([]) },
     authSession: {
       findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
@@ -57,7 +57,7 @@ function makeService() {
     { get: (name: string) => settings[name] } as unknown as AppConfigService,
   );
 
-  return { service, prisma };
+  return { service, prisma, tx };
 }
 
 /** As many sessions as were asked for: the cap, reached. */
@@ -236,5 +236,38 @@ describe('DemoService.claim under load', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/**
+ * Which course a visitor is dropped into. It was the first published course by
+ * name, which means a fixture or a course beginning with "a" silently becomes
+ * the thing the portfolio shows.
+ */
+describe('the course the demo shows', () => {
+  const course = (slug: string, sessions: number) => ({
+    id: `course-${slug}`,
+    slug,
+    currentVersion: {
+      id: `version-${slug}`,
+      sessions: Array.from({ length: sessions }, (_, index) => ({ key: `s${index + 1}` })),
+    },
+  });
+
+  it('is the fullest one, not the first alphabetically', async () => {
+    const harness = makeService();
+    harness.prisma.course.findMany.mockResolvedValue([
+      course('cover-check', 1),
+      course('docker-fundamentals', 10),
+    ]);
+
+    const { tx } = harness;
+    await harness.service.reset('demo-user');
+
+    expect(tx.enrollment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ courseId: 'course-docker-fundamentals' }),
+      }),
+    );
   });
 });

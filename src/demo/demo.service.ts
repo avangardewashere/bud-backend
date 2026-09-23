@@ -422,12 +422,27 @@ export class DemoService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Demo account reset to its sample progress');
   }
 
-  /** The course the demo shows: whatever is published, the first one by name. */
+  /**
+   * The course the demo shows: the fullest one that is published.
+   *
+   * It used to be the first by name, which quietly handed the demo to whatever
+   * happened to sort early — a one-session fixture, a course beginning with "a".
+   * A demo is a showcase, so the course with the most to show wins, and the name
+   * only breaks ties.
+   */
   private async publishedCourse() {
-    return this.prisma.course.findFirst({
+    const published = await this.prisma.course.findMany({
       where: { status: 'published', deletedAt: null, currentVersionId: { not: null } },
       orderBy: { slug: 'asc' },
       include: { currentVersion: { include: { sessions: { orderBy: { order: 'asc' } } } } },
     });
+
+    // Counted in memory: sessions hang off the version, not the course, so there
+    // is no relation to order by — and a deployment has a handful of courses.
+    return published.reduce<(typeof published)[number] | null>((best, course) => {
+      const sessions = course.currentVersion?.sessions.length ?? 0;
+      const bestSessions = best?.currentVersion?.sessions.length ?? -1;
+      return sessions > bestSessions ? course : best;
+    }, null);
   }
 }

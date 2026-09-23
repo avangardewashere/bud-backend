@@ -1,0 +1,23 @@
+{
+  "spec": "bud-course/1",
+  "id": "cover-check",
+  "title": "Cover Check",
+  "version": "1.0.0",
+  "summary": "A one-session course that exists to prove a cover image survives the trip from a package to a catalog card.",
+  "level": "beginner",
+  "estimatedHours": 1,
+  "tags": ["fixture"],
+  "outline": "outline.md",
+  "cover": "assets/cover.png",
+  "theme": { "accent": "#1E6FA8" },
+  "storageKeys": ["cover-check:state"],
+  "sessions": [
+    {
+      "id": "s1",
+      "order": 1,
+      "title": "There is a cover on this one",
+      "entry": "session-1.html",
+      "weight": "light"
+    }
+  ]
+}
