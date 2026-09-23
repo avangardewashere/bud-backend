@@ -31,6 +31,13 @@ export const continueCardSchema = z.object({
   resuming: z.boolean(),
 });
 
+export const estimatedHoursSchema = z.object({
+  /** What the course author estimated, or null when they gave no figure. */
+  total: z.number().nullable(),
+  /** The share of it behind the learner, split by session weight, to a tenth. */
+  completed: z.number().nullable(),
+});
+
 export const dashboardCourseSchema = z.object({
   slug: z.string(),
   title: z.string(),
@@ -41,6 +48,7 @@ export const dashboardCourseSchema = z.object({
   percent: z.int().min(0).max(100),
   lastOpenedAt: z.iso.datetime().nullable(),
   completedAt: z.iso.datetime().nullable(),
+  estimatedHours: estimatedHoursSchema,
 });
 
 export const recentNoteSchema = z.object({
@@ -114,5 +122,10 @@ export const dashboardSchema = z.object({
     completedCourses: z.int().nonnegative(),
     completedSessions: z.int().nonnegative(),
     totalSessions: z.int().nonnegative(),
+    /** Across every enrolled course; courses without an estimate contribute 0. */
+    estimatedHours: z.object({
+      total: z.number().nonnegative(),
+      completed: z.number().nonnegative(),
+    }),
   }),
 });

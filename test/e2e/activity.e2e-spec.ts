@@ -100,6 +100,25 @@ describe.skipIf(!up)('activity', () => {
     expect((await new ApiClient().get('/me/activity')).status).toBe(401);
   });
 
+  it('estimates hours from the course manifest, split by session weight', async () => {
+    // The Docker course says 30 hours across ten sessions of mixed weight, and
+    // this learner completed one of them above.
+    const dashboard = await api.get<{
+      courses: {
+        slug: string;
+        estimatedHours: { total: number | null; completed: number | null };
+      }[];
+      totals: { estimatedHours: { total: number; completed: number } };
+    }>('/me/dashboard');
+
+    const course = dashboard.body.courses.find((c) => c.slug === SLUG);
+
+    expect(course?.estimatedHours.total).toBe(30);
+    expect(course?.estimatedHours.completed).toBeGreaterThan(0);
+    expect(course?.estimatedHours.completed).toBeLessThan(30);
+    expect(dashboard.body.totals.estimatedHours.total).toBeGreaterThanOrEqual(30);
+  });
+
   it('gives the dashboard the same streak', async () => {
     const [dashboard, activity] = await Promise.all([
       api.get<{ streak: Activity['streak'] }>('/me/dashboard'),

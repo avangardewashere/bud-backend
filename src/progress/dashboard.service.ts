@@ -4,6 +4,7 @@ import { AppConfigService } from '../config/app-config.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { Streak } from './activity.calendar.js';
 import { ActivityService } from './activity.service.js';
+import { type EstimatedHours, estimatedHours, sumEstimatedHours } from './estimated-hours.js';
 
 export interface ContinueCard {
   slug: string;
@@ -29,6 +30,8 @@ export interface DashboardCourse {
   percent: number;
   lastOpenedAt: string | null;
   completedAt: string | null;
+  /** The author's estimate, and how much of it is behind the learner. */
+  estimatedHours: EstimatedHours;
 }
 
 /** The slice of a course the dashboard queries load. */
@@ -87,6 +90,8 @@ export interface Dashboard {
     completedCourses: number;
     completedSessions: number;
     totalSessions: number;
+    /** Estimated hours across every enrolled course, and how many are behind them. */
+    estimatedHours: { total: number; completed: number };
   };
 }
 
@@ -136,6 +141,9 @@ export class DashboardService {
       const total = enrollment.course.currentVersion?.sessions.length ?? 0;
       const done = completedByCourse.get(enrollment.courseId)?.size ?? 0;
 
+      const sessions = enrollment.course.currentVersion?.sessions ?? [];
+      const completed = completedByCourse.get(enrollment.courseId) ?? new Set<string>();
+
       return {
         slug: enrollment.course.slug,
         title: enrollment.course.title,
@@ -148,6 +156,7 @@ export class DashboardService {
         percent: total === 0 ? 0 : Math.round((done / total) * 100),
         lastOpenedAt: enrollment.lastOpenedAt?.toISOString() ?? null,
         completedAt: enrollment.completedAt?.toISOString() ?? null,
+        estimatedHours: estimatedHours(sessions, completed, enrollment.course.estimatedHours),
       };
     });
 
@@ -162,6 +171,8 @@ export class DashboardService {
         completedCourses: courses.filter((c) => c.completedAt !== null).length,
         completedSessions: courses.reduce((sum, c) => sum + c.completedSessions, 0),
         totalSessions: courses.reduce((sum, c) => sum + c.totalSessions, 0),
+        /** Estimated hours across every enrolled course (Overall Plan §5.4). */
+        estimatedHours: sumEstimatedHours(courses.map((c) => c.estimatedHours)),
       },
     };
   }
