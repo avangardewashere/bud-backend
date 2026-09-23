@@ -38,6 +38,9 @@ model User {
   role         Role      @default(learner)
   /// IANA zone. Decides the day boundary for streaks (Phase 2).
   timezone     String    @default("UTC")
+  /// A throwaway account for the public demo: reset to sample progress between
+  /// visitors, and refused the account actions a real learner may perform.
+  isDemo       Boolean   @default(false) @map("is_demo")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
   lastSeenAt   DateTime? @map("last_seen_at") @db.Timestamptz(3)

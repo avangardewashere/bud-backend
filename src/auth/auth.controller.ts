@@ -8,6 +8,7 @@ import {
   Req,
   Res,
   HttpException,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import {
@@ -28,6 +29,7 @@ import type { FastifyReply } from 'fastify';
 import { openApiSchema, zodBody } from '../common/validation/zod.pipe.js';
 import { ref } from '../openapi/components.js';
 import { AuthService } from './auth.service.js';
+import { DemoService } from '../demo/demo.service.js';
 import { GithubOAuthService } from './github-oauth.service.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import type { AuthenticatedRequest, PublicUser, RequestUser } from './auth.types.js';
@@ -53,6 +55,7 @@ export class AuthController {
     private readonly throttle: LoginThrottleService,
     private readonly github: GithubOAuthService,
     private readonly config: AppConfigService,
+    private readonly demo: DemoService,
   ) {}
 
   @Public()
@@ -195,6 +198,34 @@ export class AuthController {
     @Req() request: AuthenticatedRequest,
   ): Promise<{ revokedSessions: number }> {
     return this.auth.changePassword(user.id, input, request.budSession?.id ?? '');
+  }
+
+  @Public()
+  @Post('demo')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Sign in as the public demo learner',
+    description:
+      'Only when DEMO_MODE is on; otherwise this route does not exist. Hands ' +
+      'out one shared throwaway account, part-way through a course, which is ' +
+      'reset to its sample progress once nobody has used it for a while. ' +
+      'Anything done here is deleted with that reset.',
+  })
+  @ApiOkResponse({ description: 'Signed in as the demo learner.', schema: ref('UserEnvelope') })
+  async demoSignIn(
+    @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<{ user: PublicUser }> {
+    if (!this.demo.enabled) {
+      // 404 rather than 403: with the demo off, the route is not a thing that
+      // exists and was refused.
+      throw new NotFoundException();
+    }
+
+    const user = await this.demo.claim();
+    await this.startSession(user.id, request, reply);
+
+    return { user: AuthService.toPublicUser(user) };
   }
 
   private async startSession(

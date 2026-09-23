@@ -83,6 +83,18 @@ export const envSchema = z
     COOKIE_DOMAIN: optionalString,
     COOKIE_SECURE: boolEnv('false'),
 
+    // public demo
+    /**
+     * A throwaway account anyone can sign into, reset to sample progress
+     * between visitors. Off by default: Bud is invite-only, and a self-hosted
+     * instance must never grow a public door without asking for one.
+     */
+    DEMO_MODE: boolEnv('false'),
+    DEMO_EMAIL: z.email().default('demo@bud.local'),
+    DEMO_NAME: z.string().min(1).default('Demo Learner'),
+    /** How long the demo must be untouched before the next visitor resets it. */
+    DEMO_RESET_IDLE_MINUTES: z.coerce.number().int().positive().max(1440).default(15),
+
     // signup
     SIGNUP_MODE: z.enum(['invite_only', 'open', 'closed']).default('invite_only'),
 

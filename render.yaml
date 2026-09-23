@@ -46,6 +46,10 @@ services:
         value: 'true'
       # Course files in the Neon bucket, through the S3 driver. Neon requires
       # path-style addressing, which is S3_FORCE_PATH_STYLE's default.
+      # The portfolio demo: one throwaway account anyone can try, reset to
+      # sample progress between visitors. Sign-up stays invite-only.
+      - key: DEMO_MODE
+        value: 'true'
       - key: STORAGE_DRIVER
         value: s3
       - key: S3_BUCKET

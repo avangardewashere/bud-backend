@@ -96,6 +96,8 @@ jobs:
       S3_ACCESS_KEY_ID: minioadmin
       S3_SECRET_ACCESS_KEY: minioadmin
       SEED_ADMIN_PASSWORD: ci-admin-password
+      # The public demo, so its suite runs rather than skipping.
+      DEMO_MODE: 'true'
     steps:
       # Course ingestion writes to object storage, so the e2e job needs a real
       # S3 endpoint rather than a mock: getting the content types, prefixes and
@@ -187,10 +189,11 @@ jobs:
           npm run test:e2e -- --reporter=default --reporter=json --outputFile=/tmp/e2e.json
           passed=$(jq -r '.numPassedTests' /tmp/e2e.json)
           echo "e2e assertions that ran: $passed"
-          # 57 when every suite runs. The course-serving suite alone is 13, so a
-          # floor below ~45 would let it skip unnoticed — and it is the one that
-          # proves the course/API split, the thing the two modes differ on.
-          test "$passed" -ge 50
+          # 74 when every suite runs. Each suite skips rather than fails when
+          # its precondition is missing, so a floor is what stops a silent skip
+          # from passing as a green run — course serving (13) proves the
+          # course/API split, and the demo (6) needs DEMO_MODE above.
+          test "$passed" -ge 70
 
   # Production migrations, once per deploy. Render's free plan has no
   # pre-deploy step, and its containers restart on every wake from sleep, so
