@@ -189,11 +189,11 @@ jobs:
           npm run test:e2e -- --reporter=default --reporter=json --outputFile=/tmp/e2e.json
           passed=$(jq -r '.numPassedTests' /tmp/e2e.json)
           echo "e2e assertions that ran: $passed"
-          # 74 when every suite runs. Each suite skips rather than fails when
+          # 79 when every suite runs. Each suite skips rather than fails when
           # its precondition is missing, so a floor is what stops a silent skip
-          # from passing as a green run — course serving (13) proves the
-          # course/API split, and the demo (6) needs DEMO_MODE above.
-          test "$passed" -ge 70
+          # from passing as a green run — course serving (15) proves the
+          # course/API split, and the demo (7) needs DEMO_MODE above.
+          test "$passed" -ge 75
 
   # Production migrations, once per deploy. Render's free plan has no
   # pre-deploy step, and its containers restart on every wake from sleep, so

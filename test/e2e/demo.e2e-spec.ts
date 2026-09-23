@@ -47,6 +47,18 @@ describe.skipIf(!demoEnabled)('the public demo', () => {
     expect(providers.body.demo).toBe(true);
   });
 
+  it('hands a returning visitor the session they already have', async () => {
+    // Live demo sessions are capped and the oldest is dropped to make room, so
+    // a refresh that minted another one would spend a real visitor's place.
+    const response = await api.post('/auth/demo');
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('set-cookie')).toBeNull();
+
+    // And the session they came with still works.
+    expect((await api.get('/me')).status).toBe(200);
+  });
+
   it('signs a visitor in with no credentials at all', async () => {
     const me = await api.get<{ user: { email: string; role: string } }>('/me');
 
