@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { AppConfigService } from '../config/app-config.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { courseCoverUrl } from '../storage/course-keys.js';
 import type { Streak } from './activity.calendar.js';
 import { ActivityService } from './activity.service.js';
 import { type EstimatedHours, estimatedHours, sumEstimatedHours } from './estimated-hours.js';
@@ -148,9 +149,10 @@ export class DashboardService {
         slug: enrollment.course.slug,
         title: enrollment.course.title,
         accentColor: enrollment.course.accentColor,
-        coverUrl: enrollment.course.coverKey
-          ? `${this.config.get('COURSES_ORIGIN')}/${enrollment.course.coverKey}`
-          : null,
+        coverUrl: courseCoverUrl(
+          this.config.get('COURSES_ORIGIN'),
+          enrollment.course.currentVersion,
+        ),
         completedSessions: done,
         totalSessions: total,
         percent: total === 0 ? 0 : Math.round((done / total) * 100),

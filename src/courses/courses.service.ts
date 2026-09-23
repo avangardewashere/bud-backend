@@ -3,6 +3,7 @@ import type { Course, CourseVersion, Enrollment } from '@prisma/client';
 
 import { AppConfigService } from '../config/app-config.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { courseCoverUrl } from '../storage/course-keys.js';
 import { StorageService } from '../storage/storage.service.js';
 import type {
   CourseDetail,
@@ -221,7 +222,7 @@ export class CoursesService {
       estimatedHours: course.estimatedHours,
       tags: course.tags,
       accentColor: course.accentColor,
-      coverUrl: course.coverKey ? `${this.config.get('COURSES_ORIGIN')}/${course.coverKey}` : null,
+      coverUrl: courseCoverUrl(this.config.get('COURSES_ORIGIN'), course.currentVersion),
       sessionCount,
       version: course.currentVersion?.version ?? '',
       enrollment: enrollment

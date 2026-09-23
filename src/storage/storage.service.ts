@@ -29,14 +29,6 @@ export class StorageService {
         : new S3ObjectStore(config);
   }
 
-  /**
-   * Immutable prefix for one version of one course. Everything about a version
-   * lives under here, so deleting a version is a prefix delete.
-   */
-  static prefixFor(courseSlug: string, version: string): string {
-    return `courses/${courseSlug}/${version}`;
-  }
-
   put(key: string, body: Buffer, contentType: string): Promise<void> {
     return this.store.put(key, body, contentType);
   }

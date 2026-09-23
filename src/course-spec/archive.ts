@@ -1,6 +1,8 @@
 import { Buffer } from 'node:buffer';
 import yauzl, { type Entry, type ZipFile } from 'yauzl';
 
+import { normaliseEntryPath } from './entry-path.js';
+
 /**
  * Reading an uploaded zip is the part of this service that is actually
  * dangerous: the bytes are author-controlled and we have never run them.
@@ -66,35 +68,6 @@ export interface ReadArchiveResult {
 
 /** Thrown when the bytes are not a readable zip at all. */
 export class NotAnArchiveError extends Error {}
-
-/**
- * Normalises a zip entry name and reports whether it tries to escape.
- * Returns null when the entry is unsafe.
- */
-function normaliseEntryPath(raw: string): string | null {
-  // Some writers emit backslashes; treat them as separators rather than
-  // letting "a\..\..\b" slip past a forward-slash-only check.
-  const unified = raw.replace(/\\/g, '/');
-
-  if (unified.includes('\0')) {
-    return null;
-  }
-
-  // Absolute, or a Windows drive letter.
-  if (unified.startsWith('/') || /^[a-zA-Z]:/.test(unified)) {
-    return null;
-  }
-
-  const segments = unified.split('/');
-  if (segments.some((s) => s === '..')) {
-    return null;
-  }
-
-  // Drop "." segments and empty ones from doubled slashes.
-  const cleaned = segments.filter((s) => s !== '.' && s !== '').join('/');
-
-  return cleaned === '' ? null : cleaned;
-}
 
 /**
  * `decodeStrings: false` means fileName is a Buffer at runtime even though the

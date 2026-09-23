@@ -139,6 +139,12 @@ model Course {
   status           CourseStatus @default(draft)
   /// Accent colour from the manifest theme, surfaced in the shell chrome.
   accentColor      String?      @map("accent_color")
+  /// Unused. A cover belongs to a *version*, and this column followed the newest
+  /// upload instead: uploading a draft over a published course pointed it at a
+  /// version the content origin will not serve, so the cover went dark. It is
+  /// derived from the published version's manifest now (storage/course-keys.ts).
+  /// Left in place rather than dropped in a migration of its own; the next
+  /// schema change can take it.
   coverKey         String?      @map("cover_key")
   currentVersionId String?      @unique @map("current_version_id") @db.Uuid
   createdById      String       @map("created_by") @db.Uuid

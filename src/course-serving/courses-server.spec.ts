@@ -1,6 +1,11 @@
+import { Buffer } from 'node:buffer';
 import { describe, expect, it } from 'vitest';
 
-import { injectBridge, isCoursePath } from './courses-server.js';
+import type { AppConfigService } from '../config/app-config.service.js';
+import { courseContentUrl, courseStoragePrefix } from '../storage/course-keys.js';
+import type { StorageService } from '../storage/storage.service.js';
+import { buildCoursesServer, injectBridge, isCoursePath } from './courses-server.js';
+import type { PublishedVersions } from './published-versions.js';
 
 const BRIDGE = '<script src="http://localhost:3100/bridge.js"></script>';
 
@@ -99,5 +104,76 @@ describe('isCoursePath', () => {
     // Climbs out of the version before any server sees it — so it is not a
     // course path, and the course handler would not have served it either.
     expect(isCoursePath('/docker-fundamentals/1.0.0/../../me')).toBe(false);
+  });
+});
+
+/**
+ * The catalog and this server have to agree on where a file is, and for cover
+ * images they did not: the catalog handed out the storage key as a path, which
+ * this router reads as a slug followed by a slug and refuses. Nothing noticed,
+ * because no course in the repo has a cover. So serve one.
+ */
+describe('a cover image, from the catalog URL to the response', () => {
+  const key = `${courseStoragePrefix('docker-fundamentals', '1.0.0')}/assets/cover.png`;
+  // A PNG signature is enough: the server never parses the bytes.
+  const png = Buffer.from('89504e470d0a1a0a', 'hex');
+
+  function serverWith(stored: Map<string, Uint8Array>) {
+    const storage = {
+      getBytes: (wanted: string) => {
+        const bytes = stored.get(wanted);
+        return bytes ? Promise.resolve(bytes) : Promise.reject(new Error('no such object'));
+      },
+      getText: () => Promise.reject(new Error('not text')),
+    };
+    const origins: Record<string, string> = {
+      APP_ORIGIN: 'http://localhost:3100',
+      COURSES_ORIGIN: 'http://127.0.0.1:3101',
+    };
+
+    return buildCoursesServer(
+      storage as unknown as StorageService,
+      { get: (name: string) => origins[name] } as unknown as AppConfigService,
+      { isPublic: () => Promise.resolve(true) } as unknown as PublishedVersions,
+    );
+  }
+
+  it('serves the bytes at the URL the catalog gives the browser', async () => {
+    const server = serverWith(new Map([[key, png]]));
+    const url = courseContentUrl('http://127.0.0.1:3101', key);
+
+    const response = await server.inject({ method: 'GET', url: new URL(url!).pathname });
+    await server.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('image/png');
+    expect(Buffer.from(response.rawPayload)).toEqual(png);
+  });
+
+  it.each(['cover#1.png', '100% off.png', 'café.png', 'a b.png'])(
+    'serves a cover named %s, through the encoding and back',
+    async (name) => {
+      // The catalog encodes; this server decodes. If the two ever stop agreeing,
+      // the browser asks for a file that was never stored — or, for '#', for
+      // something else entirely.
+      const awkward = `${courseStoragePrefix('docker-fundamentals', '1.0.0')}/assets/${name}`;
+      const server = serverWith(new Map([[awkward, png]]));
+      const url = courseContentUrl('http://127.0.0.1:3101', awkward);
+
+      const response = await server.inject({ method: 'GET', url: new URL(url!).pathname });
+      await server.close();
+
+      expect(response.statusCode).toBe(200);
+      expect(Buffer.from(response.rawPayload)).toEqual(png);
+    },
+  );
+
+  it('404s for the storage key used as a path, which is what shipped', async () => {
+    const server = serverWith(new Map([[key, png]]));
+
+    const response = await server.inject({ method: 'GET', url: `/${key}` });
+    await server.close();
+
+    expect(response.statusCode).toBe(404);
   });
 });

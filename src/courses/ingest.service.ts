@@ -7,6 +7,7 @@ import { CourseSpecService } from '../course-spec/course-spec.service.js';
 import type { CourseManifest } from '../course-spec/manifest.schema.js';
 import type { ValidationReport } from '../course-spec/validation.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { courseStoragePrefix } from '../storage/course-keys.js';
 import { contentTypeFor, StorageService } from '../storage/storage.service.js';
 
 export interface IngestResult {
@@ -56,7 +57,7 @@ export class IngestService {
 
     await this.assertVersionIsNew(manifest);
 
-    const prefix = StorageService.prefixFor(manifest.id, manifest.version);
+    const prefix = courseStoragePrefix(manifest.id, manifest.version);
     const files = await extractFiles(archive);
 
     await this.storage.ensureBucket();
@@ -135,12 +136,17 @@ export class IngestService {
           estimatedHours: manifest.estimatedHours ? Math.round(manifest.estimatedHours) : null,
           tags: manifest.tags,
           accentColor: manifest.theme?.accent,
-          coverKey: manifest.cover ? `${storagePrefix}/${manifest.cover}` : null,
           createdById,
         },
         // A new version refreshes the catalog metadata but never the status:
         // uploading to a published course must not unpublish it, and must not
         // publish a draft by surprise.
+        //
+        // The cover is not among the metadata, deliberately. It used to be a
+        // column here, and a column follows the newest upload — so uploading a
+        // draft pointed the catalog's cover at a version the content origin
+        // refuses to serve. It is derived from the *published* version at read
+        // time now (storage/course-keys.ts, courseCoverUrl).
         update: {
           title: manifest.title,
           summary: manifest.summary,
@@ -148,7 +154,6 @@ export class IngestService {
           estimatedHours: manifest.estimatedHours ? Math.round(manifest.estimatedHours) : null,
           tags: manifest.tags,
           accentColor: manifest.theme?.accent,
-          coverKey: manifest.cover ? `${storagePrefix}/${manifest.cover}` : null,
           deletedAt: null,
         },
       });

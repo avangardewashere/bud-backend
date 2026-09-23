@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 import type { AppConfigService } from '../config/app-config.service.js';
 import { contentTypeFor } from '../storage/content-types.js';
+import { courseStoragePrefix } from '../storage/course-keys.js';
 import type { StorageService } from '../storage/storage.service.js';
 import type { PublishedVersions } from './published-versions.js';
 
@@ -38,7 +39,10 @@ import type { PublishedVersions } from './published-versions.js';
  */
 export const COURSE_SANDBOX_FLAGS = 'allow-scripts allow-forms allow-modals';
 
-/** `/{courseId}/{version}/{path}` — the storage prefix, exactly. */
+/**
+ * `/{courseId}/{version}/{path}` — a storage key without its bucket namespace.
+ * storage/course-keys.ts maps between the two, in both directions.
+ */
 const COURSE_PATH = /^\/([a-z0-9-]+)\/([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\/(.+)$/;
 
 /**
@@ -154,7 +158,7 @@ export function buildCoursesServer(
       return reply.code(404).type('text/plain').send('not found');
     }
 
-    const key = `courses/${courseId}/${version}/${decoded}`;
+    const key = `${courseStoragePrefix(courseId, version)}/${decoded}`;
 
     let body: string | Uint8Array;
     try {

@@ -42,3 +42,8 @@ prisma/*.db-journal
 
 # Neon CLI output: production credentials, never committed
 infra/neon/.env*
+
+# Neon's vendored agent skills (`neon skills`). Regenerable, and mostly about
+# Neon features Bud does not use, so they would read as noise in the repo.
+.agents/
+skills-lock.json
