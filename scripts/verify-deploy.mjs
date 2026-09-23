@@ -86,6 +86,58 @@ console.log('The API, directly');
   }
 }
 
+// ── who the API thinks is calling ───────────────────────────────────────────
+console.log('\nWho the API thinks you are');
+{
+  // Not observable directly, but the rate limiter answers it for free: it keys
+  // on the caller's address and reports what is left of that bucket in its own
+  // headers. So: two requests, the second claiming to come from somewhere else.
+  // If that buys a fresh allowance, X-Forwarded-For is believed from outside,
+  // and then nobody is rate limited and the ten-failures brake on sign-in is a
+  // formality. TRUST_PROXY decides this; the README says how to set it.
+  //
+  // Against a local API this proves nothing and must not cry wolf: the caller
+  // is then on loopback, which is a trusted proxy position by design, so the
+  // header is believed and should be. Only a run against a real host answers
+  // the question.
+  const remainingOf = (response) => Number(response?.headers.get('x-ratelimit-remaining'));
+  const host = new URL(api).hostname;
+  const isLocal =
+    ['localhost', '127.0.0.1', '::1', '[::1]'].includes(host) ||
+    /^10\.|^127\.|^192\.168\.|^172\.(1[6-9]|2\d|3[01])\./.test(host);
+
+  const plain = await call(`${api}/courses`);
+  const claiming = await call(`${api}/courses`, {
+    headers: { 'x-forwarded-for': '203.0.113.99' },
+  });
+
+  const before = remainingOf(plain.response);
+  const after = remainingOf(claiming.response);
+
+  if (!Number.isFinite(before) || !Number.isFinite(after)) {
+    report('warn', 'the rate limiter reports no bucket', 'no x-ratelimit-remaining header');
+  } else if (after < before) {
+    report(
+      'ok',
+      'a forged X-Forwarded-For buys no new rate-limit bucket',
+      `one bucket: ${before} then ${after} left`,
+    );
+  } else if (isLocal) {
+    report(
+      'info',
+      'a forged X-Forwarded-For is believed over loopback, which is correct',
+      'run this against the deployed API to learn anything',
+    );
+  } else {
+    report(
+      'fail',
+      'a forged X-Forwarded-For buys a new rate-limit bucket',
+      `${before} then ${after} left — anyone can opt out of the rate limit and of the ` +
+        'sign-in brake. Set TRUST_PROXY to name the proxy in front of this API.',
+    );
+  }
+}
+
 // ── course content, and its isolation ───────────────────────────────────────
 console.log('\nCourse content');
 {

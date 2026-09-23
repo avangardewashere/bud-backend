@@ -53,11 +53,29 @@ import { StorageModule } from './storage/index.js';
             // /auth/github/callback. A code is exchangeable for an access
             // token until it is used, and logs are read by more people and
             // systems than the database is.
-            req(request: { url?: string; method?: string; id?: unknown }) {
+            // Not the raw request: pino-http hands its serializer a wrapper
+            // carrying `remoteAddress` and the original request as `raw`.
+            req(request: {
+              url?: string;
+              method?: string;
+              id?: unknown;
+              remoteAddress?: string;
+              headers?: Record<string, unknown>;
+              raw?: { ip?: string };
+            }) {
               return {
                 id: request.id,
                 method: request.method,
                 url: request.url ? sanitizeUrl(request.url) : request.url,
+                // All three parts of "who is calling". TRUST_PROXY decides which
+                // one the rate limiter and the sign-in brake key on, and the only
+                // way to know it is set right for a given host is to read a real
+                // request off the logs: `ip` is the address that was believed,
+                // `remoteAddress` is the proxy that actually connected, and
+                // `forwardedFor` is what it — and anyone in front of it — claimed.
+                ip: request.raw?.ip,
+                remoteAddress: request.remoteAddress,
+                forwardedFor: request.headers?.['x-forwarded-for'],
               };
             },
           },

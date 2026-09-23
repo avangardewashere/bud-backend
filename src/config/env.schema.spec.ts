@@ -315,3 +315,29 @@ describe('S3 settings under the AWS standard names', () => {
     expect(() => validateEnv({ ...withoutS3, ...aws })).toThrowError(/S3_BUCKET is required/);
   });
 });
+
+/**
+ * TRUST_PROXY is parsed elsewhere (config/trust-proxy.ts), because the Fastify
+ * adapter needs it before this module exists. It still has to travel through
+ * here: ConfigModule writes *only what this validator returns* back into
+ * process.env, so a variable this schema does not declare is stripped on the way
+ * through and the setting silently reverts to its default — which is the exact
+ * failure the setting was added to prevent.
+ */
+describe('TRUST_PROXY', () => {
+  it('survives validation so the value in .env reaches the adapter', () => {
+    const env = validateEnv({ ...baseEnv, TRUST_PROXY: '10.1.2.3' });
+
+    expect(env.TRUST_PROXY).toBe('10.1.2.3');
+  });
+
+  it('is absent when nothing set it, rather than an empty string', () => {
+    expect(validateEnv({ ...baseEnv }).TRUST_PROXY).toBeUndefined();
+    expect(validateEnv({ ...baseEnv, TRUST_PROXY: '' }).TRUST_PROXY).toBeUndefined();
+  });
+
+  it('is passed through unvalidated, so a bad value fails where it is parsed', () => {
+    // A hop count must still reach parseTrustProxy, which is what refuses it.
+    expect(validateEnv({ ...baseEnv, TRUST_PROXY: '1' }).TRUST_PROXY).toBe('1');
+  });
+});

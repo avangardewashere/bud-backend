@@ -16,6 +16,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { ErrorReporter } from './common/errors/error-reporter.js';
 import { AppConfigService } from './config/index.js';
+import { parseTrustProxy } from './config/trust-proxy.js';
 import { buildCoursesServer, isCoursePath } from './course-serving/courses-server.js';
 import { PublishedVersions } from './course-serving/published-versions.js';
 import { StorageService } from './storage/storage.service.js';
@@ -28,6 +29,11 @@ import { componentSchemas } from './openapi/components.js';
 let routeCourse: ((req: IncomingMessage, res: ServerResponse) => void) | undefined;
 
 async function bootstrap(): Promise<void> {
+  // Read before the app exists, because the adapter is an argument to its
+  // construction. trust-proxy.ts says why this one setting lives outside the
+  // validated environment, and why it refuses a hop count.
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY);
+
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
@@ -55,9 +61,11 @@ async function bootstrap(): Promise<void> {
         server.setTimeout(options.connectionTimeout ?? 0);
         return server;
       },
-      // Behind Caddy / a load balancer, so client IPs come from X-Forwarded-For.
-      // Rate limiting and session records depend on getting this right.
-      trustProxy: true,
+      // Behind Caddy, Render's router or Vercel's rewrite, so a caller's address
+      // comes from X-Forwarded-For — but only as far as a named proxy vouches
+      // for it. `true` here trusted whatever the caller wrote, which made the
+      // rate limit and the sign-in brake opt-out. See config/trust-proxy.ts.
+      trustProxy,
       // Must stay comfortably above the 1 MiB per-value storage cap. If the two
       // match, fastify answers 413 first with no envelope and no `code`, and the
       // shell cannot tell a limit it should explain from a crash it should retry.
@@ -113,6 +121,12 @@ async function bootstrap(): Promise<void> {
     // know who is calling. One IP can legitimately be many learners behind a
     // NAT, and in development it is every browser tab at once.
     keyGenerator: (request) => request.ip,
+    // The liveness probe is exempt. It touches no database and costs nothing,
+    // and it is what the platform uses to decide this instance is alive and what
+    // the shell's sign-in page calls to wake it — none of which should be able to
+    // fail because someone else filled the bucket. Behind a proxy that hides the
+    // caller, one bucket is all there is.
+    allowList: (request) => request.url === '/health',
   });
 
   app.enableCors({
@@ -164,6 +178,14 @@ async function bootstrap(): Promise<void> {
   const port = config.get('PORT');
   const host = config.get('HOST');
   const logger = new NestLogger('Bootstrap');
+
+  if (trustProxy === true) {
+    // Loud, because it is invisible in behaviour until someone abuses it.
+    logger.warn(
+      'TRUST_PROXY=true: any caller can set X-Forwarded-For and so choose their own rate-limit ' +
+        'bucket and their own allowance of failed sign-ins. Name the proxy instead.',
+    );
+  }
 
   // Course content. Unset in development while the shell serves courses itself.
   const coursesPort = config.get('COURSES_PORT');

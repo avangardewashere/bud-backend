@@ -149,6 +149,14 @@ Errors always have the same shape:
   break the course sandbox), if cookies are insecure in production, or if a seed
   password is set in production.
 - **Logs**: cookies, auth headers, passwords and invite tokens are redacted.
+- **Who is calling**: rate limits and the sign-in brake key on the caller's
+  address, so the API believes `X-Forwarded-For` only as far as a proxy it was
+  told about. `TRUST_PROXY` names them — the default trusts a proxy on loopback
+  or a private network and nothing else, and a hop count is refused, because
+  Fastify reads a number as *trust nothing*. Every request log line carries
+  `ip`, `remoteAddress` and `forwardedFor`, which is how you check the setting
+  is right for a host rather than guessing: if `ip` is the proxy's own address
+  while `forwardedFor` is populated, the peer is not in the trust list.
 
 ---
 

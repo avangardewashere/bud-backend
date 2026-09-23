@@ -46,6 +46,19 @@ export const envSchema = z
     LOG_LEVEL: z
       .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])
       .default('info'),
+    /**
+     * Declared but not validated here: config/trust-proxy.ts owns the parsing
+     * and the refusal of a hop count, because the Fastify adapter needs the
+     * value before this module has been instantiated.
+     *
+     * It has to be declared all the same. ConfigModule assigns *only what this
+     * validator returns* back into process.env, and a Zod object strips what it
+     * does not declare — so without this line a TRUST_PROXY set in .env reached
+     * nothing, the documented override did nothing, and a hop count no longer
+     * failed boot. Silently, which is the whole failure this setting exists to
+     * prevent.
+     */
+    TRUST_PROXY: optionalString,
 
     // origins
     APP_ORIGIN: z.url(),

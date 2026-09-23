@@ -23,7 +23,15 @@ export class LoginThrottleService {
 
   private readonly failures = new Map<string, { count: number; firstAt: number }>();
 
-  /** Identifier is email + client IP: neither alone should lock the other out. */
+  /**
+   * Identifier is email + client IP: neither alone should lock the other out.
+   *
+   * Behind a proxy that hides the caller — the shell's /api rewrite, where every
+   * learner arrives as the proxy's address — the IP half is a constant and this
+   * degenerates to the email. That is why the login route checks the password
+   * before honouring a block: a key anyone can collide with must never be able
+   * to deny the real owner their own account. See auth.controller.ts.
+   */
   static key(email: string, ip: string | undefined): string {
     return `${email}|${ip ?? 'unknown'}`;
   }

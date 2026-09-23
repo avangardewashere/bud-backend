@@ -59,6 +59,10 @@ services:
 
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-2000}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      # Caddy is the only thing in front, over the compose network, so the
+      # default (a proxy on loopback or a private network) already fits. Set it
+      # only if callers can reach this container directly.
+      TRUST_PROXY: ${TRUST_PROXY:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
       postgres:

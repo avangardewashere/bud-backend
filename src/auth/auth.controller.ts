@@ -24,6 +24,7 @@ import {
   ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import type { User } from '@prisma/client';
 import type { FastifyReply } from 'fastify';
 
 import { openApiSchema, zodBody } from '../common/validation/zod.pipe.js';
@@ -134,24 +135,38 @@ export class AuthController {
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<{ user: PublicUser }> {
     const throttleKey = LoginThrottleService.key(input.email, request.ip);
+    const blocked = this.throttle.isBlocked(throttleKey);
 
-    if (this.throttle.isBlocked(throttleKey)) {
-      const retryAfter = this.throttle.retryAfterSeconds(throttleKey);
-      reply.header('Retry-After', String(retryAfter));
-      throw new HttpException(
-        {
-          error: 'Too Many Requests',
-          message: `Too many failed sign-in attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-
+    // Credentials are checked even while blocked, and the block is applied only
+    // to an attempt that also failed. Whoever knows the password always gets in.
+    //
+    // This is not politeness. The key is email + caller address, and behind the
+    // shell's /api proxy every learner arrives as the proxy's own address, so the
+    // address half is a constant and the key is really just the email. Refusing
+    // before checking would let anyone who knows an email address lock its owner
+    // out for the whole window, from anywhere, indefinitely — turning a brake on
+    // guessing into a denial of service against the one person it protects.
+    // What still limits guessing is the cost of each attempt and the global rate
+    // limit; see config/trust-proxy.ts for why the address cannot be trusted to
+    // be the caller's.
     let user;
     try {
       user = await this.auth.validateCredentials(input);
     } catch (error) {
       this.throttle.recordFailure(throttleKey);
+
+      if (blocked) {
+        const retryAfter = this.throttle.retryAfterSeconds(throttleKey);
+        reply.header('Retry-After', String(retryAfter));
+        throw new HttpException(
+          {
+            error: 'Too Many Requests',
+            message: `Too many failed sign-in attempts. Try again in ${Math.ceil(retryAfter / 60)} minute(s).`,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
       throw error;
     }
 
@@ -224,10 +239,35 @@ export class AuthController {
       throw new NotFoundException();
     }
 
+    // Already in the demo? Hand back the same account and keep the session they
+    // have. Live demo sessions are capped, and the oldest is dropped to make
+    // room, so a refresh or a second click that minted another one would spend
+    // somebody else's place — a loop of them would sign out every real visitor.
+    const resumed = await this.resumeDemo(request);
+    if (resumed) {
+      return { user: AuthService.toPublicUser(resumed) };
+    }
+
     const user = await this.demo.claim();
     await this.startSession(user.id, request, reply);
 
     return { user: AuthService.toPublicUser(user) };
+  }
+
+  /** The demo account, when the caller is already signed into it. */
+  private async resumeDemo(request: AuthenticatedRequest): Promise<User | null> {
+    const rawToken = request.cookies?.[this.sessions.cookieName];
+    if (!rawToken) {
+      return null;
+    }
+
+    // The route is public, so the guard resolved nothing for us.
+    const resolved = await this.sessions.resolve(rawToken);
+    if (resolved?.user.email !== this.demo.email) {
+      return null;
+    }
+
+    return this.demo.existing();
   }
 
   private async startSession(
