@@ -29,7 +29,8 @@
     "course:ingest": "tsx scripts/ingest-course.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "invite": "node dist/cli/create-invite.js",
-    "admin:create": "node dist/cli/create-admin.js"
+    "admin:create": "node dist/cli/create-admin.js",
+    "verify:deploy": "node scripts/verify-deploy.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
