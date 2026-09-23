@@ -63,7 +63,15 @@ export class DemoService implements OnModuleInit, OnModuleDestroy {
    */
   private static readonly MAX_EVENTS = 500;
 
-  /** Often enough that a flood cannot get far between sweeps. */
+  /**
+   * Often enough that a flood cannot get far between sweeps — a few thousand
+   * rows at the per-user ceiling.
+   *
+   * It costs the free tier nothing, which is worth saying because a timer that
+   * touches the database looks like it would: the host stops the container after
+   * fifteen minutes without a request, so this only ticks while something is
+   * already keeping both it and the database awake.
+   */
   private static readonly PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 
   /**
