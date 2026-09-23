@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 
 import { AppConfigService } from '../config/app-config.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { Streak } from './activity.calendar.js';
+import { ActivityService } from './activity.service.js';
 
 export interface ContinueCard {
   slug: string;
@@ -72,6 +74,8 @@ export interface Dashboard {
   courses: DashboardCourse[];
   /** Most recently edited first. Phase 2 §5.5. */
   recentNotes: RecentNote[];
+  /** Days in a row, which the header shows and Bud's mood reads. */
+  streak: Streak;
   /**
    * Sessions that ask for a deliverable the learner has not submitted yet.
    * Ordered so the ones they have already finished come first: those are the
@@ -98,6 +102,7 @@ export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: AppConfigService,
+    private readonly activity: ActivityService,
   ) {}
 
   async forUser(userId: string): Promise<Dashboard> {
@@ -150,6 +155,7 @@ export class DashboardService {
       continueCard: this.buildContinueCard(enrollments, completedByCourse),
       courses,
       recentNotes: await this.recentNotes(userId, enrollments),
+      streak: await this.activity.streakFor(userId),
       upcomingDeliverables: await this.upcomingDeliverables(userId, enrollments, completedByCourse),
       totals: {
         enrolledCourses: courses.length,

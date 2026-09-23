@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Query,
   Put,
   UseGuards,
 } from '@nestjs/common';
@@ -30,6 +31,8 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { RateLimit, UserRateLimitGuard } from '../common/rate-limit/user-rate-limit.guard.js';
 import { openApiSchema, zodBody } from '../common/validation/zod.pipe.js';
 import { ref } from '../openapi/components.js';
+import { ActivityService } from './activity.service.js';
+import { activityQuerySchema } from './dto/progress.schemas.js';
 import { DashboardService } from './dashboard.service.js';
 import { ProgressService } from './progress.service.js';
 import { StateService } from './state.service.js';
@@ -74,6 +77,7 @@ export class ProgressController {
     private readonly dashboard: DashboardService,
     private readonly progress: ProgressService,
     private readonly state: StateService,
+    private readonly activity: ActivityService,
   ) {}
 
   @Get('dashboard')
@@ -86,6 +90,22 @@ export class ProgressController {
   @ApiOkResponse({ description: 'The dashboard.', schema: ref('Dashboard') })
   getDashboard(@CurrentUser() user: RequestUser) {
     return this.dashboard.forUser(user.id);
+  }
+
+  @Get('activity')
+  @ApiOperation({
+    summary: 'Streaks and the activity heatmap',
+    description:
+      'Days are cut in the timezone the learner set, so an evening session counts ' +
+      'for the evening it happened in. Signing in is not activity: only studying ' +
+      'keeps a streak alive.',
+  })
+  @ApiOkResponse({ description: 'Activity for the requested window.', schema: ref('Activity') })
+  getActivity(
+    @CurrentUser() user: RequestUser,
+    @Query(zodBody(activityQuerySchema)) query: { weeks: number },
+  ) {
+    return this.activity.forUser(user.id, query.weeks);
   }
 
   // ── the storage bridge ────────────────────────────────────────────────────

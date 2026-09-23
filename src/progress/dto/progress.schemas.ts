@@ -64,6 +64,41 @@ export const upcomingDeliverableSchema = z.object({
   sessionComplete: z.boolean(),
 });
 
+export const streakSchema = z.object({
+  /** Days in a row up to today. Yesterday still counts: today is not over. */
+  current: z.int().nonnegative(),
+  longest: z.int().nonnegative(),
+  /** `YYYY-MM-DD` in the learner's timezone, or null when nothing has happened. */
+  lastActiveDate: z.string().nullable(),
+});
+
+export const activityDaySchema = z.object({
+  date: z.string(),
+  /** Sessions opened or completed, courses finished, deliverables handed in. */
+  events: z.int().nonnegative(),
+  sessionsCompleted: z.int().nonnegative(),
+});
+
+export const activitySchema = z.object({
+  /** The zone the days are cut in — the learner's, not the server's. */
+  timezone: z.string(),
+  today: z.string(),
+  streak: streakSchema,
+  /** Oldest first, one entry per day including the quiet ones. */
+  days: z.array(activityDaySchema),
+  /** Over the returned window, not all time. */
+  totals: z.object({
+    activeDays: z.int().nonnegative(),
+    events: z.int().nonnegative(),
+    sessionsCompleted: z.int().nonnegative(),
+  }),
+});
+
+export const activityQuerySchema = z.object({
+  /** Weeks of heatmap. Twelve is a quarter, which is what the dashboard draws. */
+  weeks: z.coerce.number().int().min(1).max(53).default(12),
+});
+
 export const dashboardSchema = z.object({
   /** Null on a first visit — the empty state, not an error. */
   continueCard: continueCardSchema.nullable(),
@@ -72,6 +107,8 @@ export const dashboardSchema = z.object({
   recentNotes: z.array(recentNoteSchema),
   /** Finished sessions first: those need only handing in. At most ten. */
   upcomingDeliverables: z.array(upcomingDeliverableSchema),
+  /** Days in a row, for the Bud's mood and the header (Overall Plan §5.5). */
+  streak: streakSchema,
   totals: z.object({
     enrolledCourses: z.int().nonnegative(),
     completedCourses: z.int().nonnegative(),

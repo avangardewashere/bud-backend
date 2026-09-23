@@ -25,6 +25,7 @@ import {
   noteSchema,
 } from '../notes/dto/notes.schemas.js';
 import {
+  activitySchema,
   dashboardSchema,
   sessionProgressListSchema,
   sessionProgressSchema,
@@ -85,6 +86,7 @@ export const componentSchemas = {
   SessionProgress: openApiSchema(sessionProgressSchema, 'output'),
   SessionProgressList: openApiSchema(sessionProgressListSchema, 'output'),
   Dashboard: openApiSchema(dashboardSchema, 'output'),
+  Activity: openApiSchema(activitySchema, 'output'),
 
   // ── notes and deliverables ────────────────────────────────────────────────
   Note: openApiSchema(noteSchema, 'output'),
