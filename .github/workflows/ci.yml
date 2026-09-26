@@ -99,15 +99,33 @@ jobs:
       # The public demo, so its suite runs rather than skipping.
       DEMO_MODE: 'true'
     steps:
-      # Course ingestion writes to object storage, so the e2e job needs a real
-      # S3 endpoint rather than a mock: getting the content types, prefixes and
-      # path-style addressing wrong is exactly what this job should catch.
+      # Course ingestion writes to object storage, so this job needs a real S3
+      # endpoint rather than a mock: getting the content types, prefixes and
+      # path-style addressing wrong is exactly what it should catch. A real MinIO
+      # also *enforces* credentials, which a mock does not — a credentials
+      # mismatch is how this job failed the very first time it ran, and a mock
+      # would have let it through.
+      #
+      # Only for the leg that stores files in S3. The other leg uses the database
+      # driver and needs no object store at all, so it should not be able to fail
+      # because of one.
+      #
+      # From Chainguard, because MinIO stopped publishing its community image for
+      # anonymous pulls: `quay.io/minio/minio` and `docker.io/minio/minio` both
+      # answer 401 now, which broke this job two days after it last passed. Same
+      # binary, same flags, same health endpoint. `:latest` is the only tag
+      # Chainguard serves free, and old digests are collected, so pinning one
+      # would break later rather than sooner.
+      #
+      # `--user 0` because that image runs as uid 65532, which cannot create /data
+      # at the filesystem root. It is a throwaway container in a throwaway VM.
       - name: Start MinIO
+        if: matrix.storage_driver == 's3'
         run: |
-          docker run -d --name minio -p 9000:9000 \
+          docker run -d --name minio --user 0 -p 9000:9000 \
             -e MINIO_ROOT_USER="$S3_ACCESS_KEY_ID" \
             -e MINIO_ROOT_PASSWORD="$S3_SECRET_ACCESS_KEY" \
-            quay.io/minio/minio:latest server /data
+            cgr.dev/chainguard/minio:latest server /data
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:9000/minio/health/ready; then echo "MinIO ready"; exit 0; fi
             sleep 1
