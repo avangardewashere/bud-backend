@@ -26,6 +26,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
+    "course": "node dist/cli/course.js",
     "course:ingest": "tsx scripts/ingest-course.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "invite": "node dist/cli/create-invite.js",

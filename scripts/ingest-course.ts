@@ -9,16 +9,15 @@
  *
  * Development only. In production a course arrives through POST /admin/courses.
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, resolve, sep } from 'node:path';
-import { Buffer } from 'node:buffer';
+import { existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { ConfigService } from '@nestjs/config';
-import yazl from 'yazl';
 
+import { formatReport } from '../src/cli/report.js';
 import { AppConfigService } from '../src/config/app-config.service.js';
 import { validateEnv, type Env } from '../src/config/env.schema.js';
 import { CourseSpecService } from '../src/course-spec/course-spec.service.js';
-import type { ValidationResult } from '../src/course-spec/validation.types.js';
+import { packCourseDirectory } from '../src/course-spec/pack.js';
 import { IngestService } from '../src/courses/ingest.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { StorageService } from '../src/storage/storage.service.js';
@@ -26,37 +25,6 @@ import { StorageService } from '../src/storage/storage.service.js';
 if (existsSync('.env')) {
   process.loadEnvFile('.env');
 }
-
-function filesUnder(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = join(dir, entry.name);
-    return entry.isDirectory() ? filesUnder(full) : [full];
-  });
-}
-
-function zipDirectory(dir: string): Promise<Buffer> {
-  const zip = new yazl.ZipFile();
-
-  for (const file of filesUnder(dir)) {
-    // Zip entry names are always forward-slashed, whatever the host OS uses.
-    zip.addBuffer(readFileSync(file), relative(dir, file).split(sep).join('/'));
-  }
-
-  zip.end();
-
-  return new Promise((resolvePromise, reject) => {
-    const chunks: Buffer[] = [];
-    zip.outputStream.on('data', (c: Buffer) => chunks.push(c));
-    zip.outputStream.on('error', reject);
-    zip.outputStream.on('end', () => resolvePromise(Buffer.concat(chunks)));
-  });
-}
-
-const ICON: Record<ValidationResult['severity'], string> = {
-  pass: '✔',
-  warning: '!',
-  error: '✖',
-};
 
 async function main(): Promise<void> {
   const [dirArg, ...rest] = process.argv.slice(2);
@@ -89,18 +57,18 @@ async function main(): Promise<void> {
     }
 
     console.log(`Packaging ${dir}`);
-    const archive = await zipDirectory(dir);
+    // The same packer `bud-course validate` uses, so what this ingests is what
+    // an author was told would be accepted.
+    const { archive, skipped } = await packCourseDirectory(dir);
     console.log(`  ${(archive.byteLength / 1024).toFixed(1)} KB\n`);
+    for (const name of skipped) {
+      console.log(`  · left out: ${name}`);
+    }
 
     const result = await ingest.ingest(archive, admin.id);
 
-    for (const line of result.report.results) {
-      console.log(`  ${ICON[line.severity]} ${line.message}`);
-      if (line.detail) {
-        for (const detailLine of line.detail.split('\n')) {
-          console.log(`      ${detailLine}`);
-        }
-      }
+    for (const line of formatReport(result.report)) {
+      console.log(line);
     }
 
     console.log();

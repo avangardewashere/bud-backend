@@ -89,7 +89,7 @@ export class CourseSpecService {
         results.push(
           error('manifest_missing', 'That file is not a readable zip archive.', cause.message),
         );
-        results.push(checksSkipped(5, 'upload a zip archive and try again.'));
+        results.push(checksSkipped(5, 'provide a zip archive and try again.'));
         return { report: toReport(results) };
       }
       throw cause;
@@ -109,7 +109,7 @@ export class CourseSpecService {
           ),
         );
       }
-      results.push(checksSkipped(5, 'repackage the course and upload again.'));
+      results.push(checksSkipped(5, 'repackage the course and try again.'));
       return { report: toReport(results) };
     }
 
@@ -126,7 +126,7 @@ export class CourseSpecService {
             : 'It must sit beside the course files, not inside a subfolder.',
         ),
       );
-      results.push(checksSkipped(4, `add ${MANIFEST_FILENAME} and upload again.`));
+      results.push(checksSkipped(4, `add ${MANIFEST_FILENAME} and try again.`));
       return { report: toReport(results) };
     }
 
@@ -141,7 +141,7 @@ export class CourseSpecService {
           cause instanceof Error ? cause.message : undefined,
         ),
       );
-      results.push(checksSkipped(4, 'fix the manifest and upload again.'));
+      results.push(checksSkipped(4, 'fix the manifest and try again.'));
       return { report: toReport(results) };
     }
 
@@ -157,7 +157,7 @@ export class CourseSpecService {
             .join('\n'),
         ),
       );
-      results.push(checksSkipped(4, 'fix the manifest and upload again.'));
+      results.push(checksSkipped(4, 'fix the manifest and try again.'));
       return { report: toReport(results) };
     }
 

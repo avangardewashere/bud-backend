@@ -83,7 +83,40 @@ curl -b cookies.txt http://localhost:3102/me
 | `npm run db:seed` | Create the admin user (refuses to run in production) |
 | `npm run admin:create -- <email>` | Create the **first** admin on any database, production included. Generates the password and prints it once; refuses once an admin exists. Needs `npm run build` |
 | `npm run invite -- <email> [--admin]` | Invite someone. Prints the link once. Needs `npm run build` |
+| `npm run course -- validate <path>` | Check a course package against the spec. Needs `npm run build`. See **Authoring a course** |
+| `npm run course:ingest -- <dir> [--publish]` | Upload a course from disk in development, through the same path an admin upload takes |
 
+---
+
+## Authoring a course
+
+A course is a folder with a `bud.manifest.json` and the files it names. `bud-course` is the
+toolkit for writing one, and it needs no database, no environment and no running Bud — whether a
+package is valid is a property of the files.
+
+```bash
+npm run build
+npm run course -- validate ./my-course
+```
+
+It takes a directory or an already-built `.zip`, and exits **0** when the package would be
+accepted, **1** when it would be refused. Warnings never fail it: a missing cover image is worth
+telling someone about and is no reason to refuse their work. `--json` prints the report verbatim —
+the same shape `POST /admin/courses` returns — for a pre-commit hook or a CI step.
+
+**It cannot disagree with the server.** It runs the same `CourseSpecService` the upload route runs,
+over an archive built by the same packer, so "it validates locally" and "it will be accepted" are
+the same sentence. A separate client-side checker would be a second implementation of these rules,
+and an author would discover the difference at upload time; `Planning/Roadmap-Status.md` records
+that decision.
+
+Packing leaves out what is never part of a course — `.git`, `node_modules`, `.DS_Store`,
+`Thumbs.db` and friends — and prints every one it left out, because silently dropping a file the
+manifest points at would be worse than the error it avoids. The same packer builds the archive for
+`course:ingest`, and it is deterministic: the same files twice produce the same bytes.
+
+The machine-readable spec is `GET /course-spec/schema`: the manifest's JSON Schema, the archive
+limits, the allowed extensions and the validation codes.
 ---
 
 ## Layout
