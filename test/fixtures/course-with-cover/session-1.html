@@ -14,11 +14,15 @@
   const input = document.getElementById('note');
   const KEY = 'cover-check:state';
 
-  window.storage.get(KEY).then((saved) => {
-    if (typeof saved === 'string') input.value = saved;
+  // `storage.get` resolves to { value } — a JSON string or null — which is the
+  // shape the Docker worksheets already expect. Overall Plan §3 has the contract.
+  window.storage.get(KEY).then((result) => {
+    if (result && result.value) {
+      input.value = JSON.parse(result.value).note ?? '';
+    }
   });
 
   input.addEventListener('input', () => {
-    window.storage.set(KEY, input.value);
+    window.storage.set(KEY, JSON.stringify({ note: input.value }));
   });
 </script>

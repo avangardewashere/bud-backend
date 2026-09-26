@@ -83,6 +83,7 @@ curl -b cookies.txt http://localhost:3102/me
 | `npm run db:seed` | Create the admin user (refuses to run in production) |
 | `npm run admin:create -- <email>` | Create the **first** admin on any database, production included. Generates the password and prints it once; refuses once an admin exists. Needs `npm run build` |
 | `npm run invite -- <email> [--admin]` | Invite someone. Prints the link once. Needs `npm run build` |
+| `npm run course -- init <dir>` | Start a course: manifest, outline, and a first session with the bridge wired |
 | `npm run course -- validate <path>` | Check a course package against the spec. Needs `npm run build`. See **Authoring a course** |
 | `npm run course -- pack <dir>` | Check a directory, then write the `.zip` to upload |
 | `npm run course:ingest -- <dir> [--publish]` | Upload a course from disk in development, through the same path an admin upload takes |
@@ -97,9 +98,22 @@ package is valid is a property of the files.
 
 ```bash
 npm run build
+npm run course -- init ./my-course          # id from the folder name
 npm run course -- validate ./my-course
 npm run course -- pack ./my-course          # writes <id>-<version>.zip
 ```
+
+`init` writes a manifest, an outline and a first session, then validates what it wrote with the same
+code the upload route uses — a scaffold that needs fixing before it passes teaches the wrong thing.
+It refuses to write into a directory that already has anything in it.
+
+The session it writes is the actual point. Authoring friction lives almost entirely in the storage
+bridge, so the template uses all of it correctly: `storage.get` resolving to `{ value }` rather than
+the value (the detail everyone gets wrong first), `storage.delete` so "clear saved work" is not a
+button that silently does nothing, `bud.height` so the frame grows to the content and the shell owns
+scrolling, and `bud.ready`. It also falls back to `localStorage` when `window.storage` is absent, so
+the file can be opened straight from disk while it is being written. `Overall Plan.md` §3 has the
+frozen contract.
 
 It takes a directory or an already-built `.zip`, and exits **0** when the package would be
 accepted, **1** when it would be refused. Warnings never fail it: a missing cover image is worth
@@ -124,6 +138,12 @@ what identifies a package rather than whatever the folder is called, and it will
 existing file without `--force`: a published version is supposed to be immutable, so overwriting one
 is a decision. It prints a SHA-256, which means something precisely because packing is
 deterministic — worth keeping beside "I uploaded this".
+
+**Where this runs, honestly.** `bud-course` is a compiled entry point in this repo, so today an
+author needs a clone and a `npm run build`. That is fine while the only author is whoever runs Bud;
+it is not fine for a stranger, and publishing it as its own package is the obvious next step rather
+than a solved problem. Nothing in the CLI assumes otherwise — it imports the spec and the validator
+and touches nothing else — so moving it is packaging work, not a rewrite.
 
 The machine-readable spec is `GET /course-spec/schema`: the manifest's JSON Schema, the archive
 limits, the allowed extensions and the validation codes.

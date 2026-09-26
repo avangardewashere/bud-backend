@@ -277,3 +277,112 @@ describe('bud-course pack', () => {
     await expect(run(['pack', join(root, 'built.zip')])).rejects.toThrowError(/Not a directory/);
   });
 });
+
+/**
+ * `bud-course init`. The template is the product here: authoring friction lives
+ * almost entirely in the bridge, so the first session has to get it right, and
+ * the scaffold has to be valid the moment it is written.
+ */
+describe('bud-course init', () => {
+  it('writes a course that already validates', async () => {
+    const root = join(tree({}), 'my-new-course');
+
+    const code = await run(['init', root]);
+
+    expect(code).toBe(0);
+    expect(printed()).toContain('created bud.manifest.json');
+    // The scaffold is validated by the same code the upload route uses. If this
+    // ever fails, the template is wrong and an author should not find out first.
+    expect(printed()).toContain('Manifest valid');
+    expect(await run(['validate', root])).toBe(0);
+  });
+
+  it('takes the course id from the folder name', async () => {
+    const root = join(tree({}), 'Docker Deep Dive');
+
+    expect(await run(['init', root])).toBe(0);
+
+    const manifest = JSON.parse(readFileSync(join(root, 'bud.manifest.json'), 'utf8')) as {
+      id: string;
+      title: string;
+    };
+    expect(manifest.id).toBe('docker-deep-dive');
+    expect(manifest.title).toBe('Docker Deep Dive');
+  });
+
+  it('takes an explicit id and title over the folder name', async () => {
+    const root = join(tree({}), 'whatever');
+
+    expect(await run(['init', root, '--id', 'kubernetes-basics', '--title', 'K8s, Slowly'])).toBe(
+      0,
+    );
+
+    const manifest = JSON.parse(readFileSync(join(root, 'bud.manifest.json'), 'utf8')) as {
+      id: string;
+      title: string;
+    };
+    expect(manifest.id).toBe('kubernetes-basics');
+    expect(manifest.title).toBe('K8s, Slowly');
+  });
+
+  it('refuses an id the manifest would reject', async () => {
+    const root = join(tree({}), 'fine');
+
+    expect(await run(['init', root, '--id', 'Not A Slug'])).toBe(2);
+    expect(err.join('')).toContain('not a usable course id');
+    expect(existsSync(root)).toBe(false);
+  });
+
+  it('asks for an id when the folder name cannot give one', async () => {
+    const root = join(tree({}), '!!!');
+
+    expect(await run(['init', root])).toBe(2);
+    expect(err.join('')).toContain('--id');
+  });
+
+  it('never writes into a directory that has something in it', async () => {
+    // An author who typed the wrong path should lose nothing.
+    const root = tree({ 'important.md': 'a year of work' });
+
+    expect(await run(['init', root])).toBe(1);
+    expect(err.join('')).toContain('not empty');
+    expect(readFileSync(join(root, 'important.md'), 'utf8')).toBe('a year of work');
+  });
+
+  it('wires the bridge the way the contract actually works', async () => {
+    const root = join(tree({}), 'bridge-check');
+    await run(['init', root]);
+
+    const session = readFileSync(join(root, 'session-1.html'), 'utf8');
+
+    // get() resolves to { value }, not the value — the detail everyone gets
+    // wrong first, and the reason this test exists.
+    expect(session).toMatch(/result\.value/);
+    expect(session).toContain('storage.set(KEY, JSON.stringify(state))');
+    // Without delete(), a "clear saved work" button silently does nothing.
+    expect(session).toContain('storage.delete(KEY)');
+    // The frame grows to the content, so the shell owns scrolling.
+    expect(session).toContain('bud.height(');
+    expect(session).toContain('bud.ready()');
+  });
+
+  it('declares the key its session saves under', async () => {
+    const root = join(tree({}), 'keyed');
+    await run(['init', root]);
+
+    const manifest = JSON.parse(readFileSync(join(root, 'bud.manifest.json'), 'utf8')) as {
+      storageKeys: string[];
+    };
+    const session = readFileSync(join(root, 'session-1.html'), 'utf8');
+
+    // A key the manifest does not list still works, but the platform can only
+    // show and export what it was told about.
+    expect(manifest.storageKeys).toEqual(['keyed:session-1']);
+    expect(session).toContain('"keyed:session-1"');
+  });
+
+  it('needs a directory', async () => {
+    expect(await run(['init'])).toBe(2);
+    expect(err.join('')).toContain('init needs a directory');
+  });
+});

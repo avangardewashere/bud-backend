@@ -19,16 +19,20 @@
  */
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 
 import { DEFAULT_ARCHIVE_LIMITS } from '../course-spec/archive.js';
 import { CourseSpecService, type ValidationOutcome } from '../course-spec/course-spec.service.js';
 import { packCourseDirectory } from '../course-spec/pack.js';
 import { formatReport, summariseReport } from './report.js';
+import { scaffoldFiles, slugify } from './scaffold.js';
 
 const USAGE = `bud-course — check and build Bud course packages
 
+  init <dir> [--id <slug>] [--title <title>]
+                             Start a course: a manifest, an outline, and a first
+                             session with the storage bridge already wired
   validate <path> [--json]   Check a course directory or .zip against the spec
   pack <dir> [-o <file>]     Check a directory, then write the .zip to upload
 
@@ -194,10 +198,97 @@ export async function packCommand(argv: string[]): Promise<number> {
   return 0;
 }
 
+/** A flag's value, or undefined. `--id slug` and `--id=slug` both work. */
+function flag(argv: string[], name: string): string | undefined {
+  const inline = argv.find((arg) => arg.startsWith(`--${name}=`));
+  if (inline) {
+    return inline.slice(name.length + 3);
+  }
+
+  const at = argv.indexOf(`--${name}`);
+  const value = at === -1 ? undefined : argv[at + 1];
+  return value?.startsWith('-') ? undefined : value;
+}
+
+/**
+ * Writes a course that is already valid, and proves it by validating what it
+ * just wrote with the same code everything else uses. A scaffold that needs
+ * fixing before it passes is a scaffold that teaches the wrong thing.
+ */
+export async function initCommand(argv: string[]): Promise<number> {
+  const idFlag = flag(argv, 'id');
+  const titleFlag = flag(argv, 'title');
+  const skip = new Set([idFlag, titleFlag].filter((value): value is string => value !== undefined));
+  const dir = argv.find((arg) => !arg.startsWith('-') && !skip.has(arg));
+
+  if (!dir) {
+    process.stderr.write('init needs a directory: bud-course init <dir> [--id <slug>]\n');
+    return 2;
+  }
+
+  const full = resolve(dir);
+
+  // Never write into work that is already there. An author who typed the wrong
+  // path should lose nothing.
+  if (existsSync(full) && readdirSync(full).length > 0) {
+    process.stderr.write(`${full} is not empty. Pick a new directory.\n`);
+    return 1;
+  }
+
+  const id = idFlag ?? slugify(basename(full));
+  if (!id) {
+    process.stderr.write(
+      `Cannot make a course id from "${basename(full)}". Pass --id <slug>: lowercase ` +
+        'letters, digits and single hyphens.\n',
+    );
+    return 2;
+  }
+  if (!slugify(id) || slugify(id) !== id) {
+    process.stderr.write(
+      `"${id}" is not a usable course id: lowercase letters, digits and single hyphens, 2 to 64 characters.\n`,
+    );
+    return 2;
+  }
+
+  for (const file of scaffoldFiles(id, titleFlag)) {
+    const target = join(full, file.path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, file.content);
+    process.stdout.write(`  created ${file.path}\n`);
+  }
+
+  // The same validator, on what was just written. If this ever fails, the
+  // template is wrong and the author should not be the one to discover it.
+  const packed = await packCourseDirectory(full);
+  const outcome = await new CourseSpecService().validate(packed.archive);
+
+  process.stdout.write('\n');
+  for (const line of formatReport(outcome.report)) {
+    process.stdout.write(`${line}\n`);
+  }
+
+  if (!outcome.report.ok) {
+    process.stderr.write(
+      '\nThe template does not validate. That is a bug in Bud, not in your course.\n',
+    );
+    return 1;
+  }
+
+  process.stdout.write(
+    `\n${id} is ready. Write session-1.html, then:\n` +
+      `  npm run course -- validate ${dir}\n` +
+      `  npm run course -- pack ${dir}\n`,
+  );
+
+  return 0;
+}
+
 export async function run(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
 
   switch (command) {
+    case 'init':
+      return initCommand(rest);
     case 'validate':
       return validateCommand(rest);
     case 'pack':
