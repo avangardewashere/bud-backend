@@ -36,6 +36,17 @@ const NEVER_PACKED = new Set([
 ]);
 
 /**
+ * Extensions that cannot be part of a valid package, so packing one in would
+ * only produce a rejection.
+ *
+ * `.zip` earns its place by being the natural mistake: the obvious way to build
+ * a package is `pack . -o course.zip` from inside the course folder, and the
+ * second run would then try to pack the first run's output. The spec's allowlist
+ * has never included zip, so nothing legitimate is lost.
+ */
+const NEVER_PACKED_EXTENSIONS = new Set(['.zip']);
+
+/**
  * A fixed timestamp for every entry, so packing the same files twice produces
  * the same bytes. An author can then check that what they are uploading is what
  * they built, and a rebuild in CI is comparable. The zip format stores local
@@ -70,7 +81,8 @@ export function courseFilesUnder(dir: string): { files: string[]; skipped: strin
       const full = join(current, entry.name);
       const rel = relative(dir, full).split(sep).join('/');
 
-      if (NEVER_PACKED.has(entry.name)) {
+      const extension = entry.name.slice(entry.name.lastIndexOf('.')).toLowerCase();
+      if (NEVER_PACKED.has(entry.name) || NEVER_PACKED_EXTENSIONS.has(extension)) {
         skipped.push(rel);
         continue;
       }

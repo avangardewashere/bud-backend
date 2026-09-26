@@ -84,6 +84,7 @@ curl -b cookies.txt http://localhost:3102/me
 | `npm run admin:create -- <email>` | Create the **first** admin on any database, production included. Generates the password and prints it once; refuses once an admin exists. Needs `npm run build` |
 | `npm run invite -- <email> [--admin]` | Invite someone. Prints the link once. Needs `npm run build` |
 | `npm run course -- validate <path>` | Check a course package against the spec. Needs `npm run build`. See **Authoring a course** |
+| `npm run course -- pack <dir>` | Check a directory, then write the `.zip` to upload |
 | `npm run course:ingest -- <dir> [--publish]` | Upload a course from disk in development, through the same path an admin upload takes |
 
 ---
@@ -97,6 +98,7 @@ package is valid is a property of the files.
 ```bash
 npm run build
 npm run course -- validate ./my-course
+npm run course -- pack ./my-course          # writes <id>-<version>.zip
 ```
 
 It takes a directory or an already-built `.zip`, and exits **0** when the package would be
@@ -114,6 +116,14 @@ Packing leaves out what is never part of a course — `.git`, `node_modules`, `.
 `Thumbs.db` and friends — and prints every one it left out, because silently dropping a file the
 manifest points at would be worse than the error it avoids. The same packer builds the archive for
 `course:ingest`, and it is deterministic: the same files twice produce the same bytes.
+
+`pack` is `validate` plus a file. It writes nothing when the package would be refused — handing
+over a package that will be rejected only moves the rejection to the one place the author is not
+present to read it. The archive is named `<id>-<version>.zip` from the manifest, because that is
+what identifies a package rather than whatever the folder is called, and it will not replace an
+existing file without `--force`: a published version is supposed to be immutable, so overwriting one
+is a decision. It prints a SHA-256, which means something precisely because packing is
+deterministic — worth keeping beside "I uploaded this".
 
 The machine-readable spec is `GET /course-spec/schema`: the manifest's JSON Schema, the archive
 limits, the allowed extensions and the validation codes.

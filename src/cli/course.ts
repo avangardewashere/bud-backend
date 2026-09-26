@@ -18,8 +18,9 @@
  * no tsx and no dev dependencies.
  */
 import { Buffer } from 'node:buffer';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 import { DEFAULT_ARCHIVE_LIMITS } from '../course-spec/archive.js';
 import { CourseSpecService, type ValidationOutcome } from '../course-spec/course-spec.service.js';
@@ -29,10 +30,14 @@ import { formatReport, summariseReport } from './report.js';
 const USAGE = `bud-course — check and build Bud course packages
 
   validate <path> [--json]   Check a course directory or .zip against the spec
+  pack <dir> [-o <file>]     Check a directory, then write the .zip to upload
 
-A path may be a directory of course files or an already-built .zip.
+A path to validate may be a directory of course files or an already-built .zip.
 Exits 0 when the package would be accepted, 1 when it would be refused.
 Warnings never fail: they are things worth fixing, not reasons to refuse.
+
+pack writes <id>-<version>.zip beside you unless -o says otherwise, and will
+not overwrite an existing file unless you pass --force.
 `;
 
 /** Where the archive came from, and how big it turned out. */
@@ -108,12 +113,95 @@ export async function validateCommand(argv: string[]): Promise<number> {
   return outcome.report.ok ? 0 : 1;
 }
 
+/**
+ * Builds the archive an admin uploads — but only once it would be accepted.
+ *
+ * Packing an unpublishable course and handing it over would just move the
+ * rejection later, to the one place where the author is not present to read it.
+ * Warnings still pack: they are notes, not refusals.
+ */
+export async function packCommand(argv: string[]): Promise<number> {
+  const force = argv.includes('--force');
+  const outFlag = argv.findIndex((arg) => arg === '-o' || arg === '--out');
+  const out = outFlag === -1 ? undefined : argv[outFlag + 1];
+
+  if (outFlag !== -1 && (out === undefined || out.startsWith('-'))) {
+    process.stderr.write('-o needs a filename after it.\n');
+    return 2;
+  }
+
+  // `index !== outFlag + 1` skips -o's own value. Guarded, because with no -o
+  // at all outFlag is -1 and that test would skip the first argument instead —
+  // which is the directory.
+  const dir = argv.find(
+    (arg, index) => !arg.startsWith('-') && (outFlag === -1 || index !== outFlag + 1),
+  );
+
+  if (!dir) {
+    process.stderr.write('pack needs a directory: bud-course pack <dir> [-o <file>]\n');
+    return 2;
+  }
+
+  const full = resolve(dir);
+  if (!existsSync(full) || !statSync(full).isDirectory()) {
+    throw new Error(`Not a directory: ${full}`);
+  }
+
+  const packed = await packCourseDirectory(full);
+  const outcome = await new CourseSpecService().validate(packed.archive);
+
+  for (const name of packed.skipped) {
+    process.stdout.write(`  · left out: ${name}\n`);
+  }
+
+  for (const line of formatReport(outcome.report)) {
+    process.stdout.write(`${line}\n`);
+  }
+  process.stdout.write(`\n${summariseReport(outcome.report)}\n`);
+
+  if (!outcome.report.ok || !outcome.manifest) {
+    process.stderr.write('\nNothing written.\n');
+    return 1;
+  }
+
+  const { id, version, title, sessions } = outcome.manifest;
+  process.stdout.write(
+    `\n  ${title} — ${id}@${version}, ${sessions.length} session${sessions.length === 1 ? '' : 's'}\n`,
+  );
+
+  // Named from the manifest, because the id and the version are what identify a
+  // package — not whatever the folder holding it happens to be called.
+  const target = resolve(out ?? `${id}-${version}.zip`);
+
+  // A package may already be the one someone uploaded, and a version is
+  // supposed to be immutable, so overwriting is a decision rather than a default.
+  if (existsSync(target) && !force) {
+    process.stderr.write(`\n${target} exists already. Pass --force to replace it.\n`);
+    return 1;
+  }
+
+  // `pack -o build/course.zip` should work the first time, without a mkdir.
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, packed.archive);
+
+  const kb = (packed.archive.byteLength / 1024).toFixed(1);
+  const digest = createHash('sha256').update(packed.archive).digest('hex').slice(0, 16);
+  process.stdout.write(`\nWrote ${target}\n  ${kb} KB · sha256 ${digest}…\n`);
+  // Packing is deterministic, so this digest identifies the files that went in —
+  // it is worth pasting somewhere alongside "I uploaded this".
+  process.stdout.write(`  ${packed.entries.length} files, ready for POST /admin/courses\n`);
+
+  return 0;
+}
+
 export async function run(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
 
   switch (command) {
     case 'validate':
       return validateCommand(rest);
+    case 'pack':
+      return packCommand(rest);
     case undefined:
     case '--help':
     case '-h':

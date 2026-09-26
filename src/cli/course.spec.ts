@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -153,5 +153,127 @@ describe('bud-course validate', () => {
     await expect(run(['validate', join(tmpdir(), 'bud-nope-does-not-exist')])).rejects.toThrowError(
       /No such file or directory/,
     );
+  });
+});
+
+/**
+ * `bud-course pack`. The thing an author hands over, so the two rules that
+ * matter are: it never writes a package that would be refused, and it never
+ * quietly replaces one that might already have been uploaded.
+ */
+describe('bud-course pack', () => {
+  const good = () => ({
+    'bud.manifest.json': JSON.stringify({
+      spec: 'bud-course/1',
+      id: 'packable',
+      title: 'Packable',
+      version: '2.1.0',
+      summary: 'A course that should pack cleanly.',
+      cover: 'cover.png',
+      sessions: [{ id: 's1', order: 1, title: 'One', entry: 'one.html' }],
+    }),
+    'one.html': '<p>one</p>',
+    'cover.png': 'pretend png',
+  });
+
+  it('names the archive after the manifest, not the folder', async () => {
+    // The id and version identify a package; the folder name does not.
+    const root = tree(good());
+    const elsewhere = tree({});
+    const previous = process.cwd();
+
+    try {
+      process.chdir(elsewhere);
+      const code = await run(['pack', root]);
+
+      expect(code).toBe(0);
+      expect(existsSync(join(elsewhere, 'packable-2.1.0.zip'))).toBe(true);
+    } finally {
+      process.chdir(previous);
+    }
+  });
+
+  it('creates the directory it was told to write into', async () => {
+    const root = tree(good());
+    const target = join(root, 'build', 'nested', 'course.zip');
+
+    const code = await run(['pack', root, '-o', target]);
+
+    expect(code).toBe(0);
+    expect(existsSync(target)).toBe(true);
+  });
+
+  it('does not try to pack the archive it built last time', async () => {
+    // `pack . -o course.zip` from inside the course folder is the obvious way to
+    // do this, and the second run would otherwise pack the first run's output —
+    // a .zip, which the spec has never allowed inside a package.
+    const root = tree(good());
+    const target = join(root, 'packable-2.1.0.zip');
+
+    expect(await run(['pack', root, '-o', target])).toBe(0);
+    out.length = 0;
+    expect(await run(['pack', root, '-o', target, '--force'])).toBe(0);
+    expect(printed()).toContain('left out: packable-2.1.0.zip');
+  });
+
+  it('writes nothing when the package would be refused', async () => {
+    const root = tree({ 'one.html': '<p>no manifest beside me</p>' });
+    const out = join(root, 'never.zip');
+
+    const code = await run(['pack', root, '-o', out]);
+
+    expect(code).toBe(1);
+    expect(existsSync(out)).toBe(false);
+    expect(err.join('')).toContain('Nothing written');
+  });
+
+  it('refuses to replace an existing archive', async () => {
+    const root = tree(good());
+    const out = join(root, 'taken.zip');
+    writeFileSync(out, 'an earlier build, perhaps the one that was uploaded');
+
+    const code = await run(['pack', root, '-o', out]);
+
+    expect(code).toBe(1);
+    expect(err.join('')).toContain('--force');
+    // Untouched, which is the point: a version is supposed to be immutable.
+    expect(readFileSync(out, 'utf8')).toContain('an earlier build');
+  });
+
+  it('replaces one when told to', async () => {
+    const root = tree(good());
+    const out = join(root, 'taken.zip');
+    writeFileSync(out, 'an earlier build');
+
+    const code = await run(['pack', root, '-o', out, '--force']);
+
+    expect(code).toBe(0);
+    expect(readFileSync(out, 'utf8')).not.toContain('an earlier build');
+  });
+
+  it('prints a digest, which means something because packing is deterministic', async () => {
+    const root = tree(good());
+
+    await run(['pack', root, '-o', join(root, 'a.zip')]);
+    const first = printed();
+    out.length = 0;
+    await run(['pack', root, '-o', join(root, 'b.zip')]);
+
+    const digestOf = (text: string) => /sha256 ([0-9a-f]+)/.exec(text)?.[1];
+    expect(digestOf(first)).toBeDefined();
+    expect(digestOf(printed())).toBe(digestOf(first));
+  });
+
+  it('says what to do when -o has no filename', async () => {
+    expect(await run(['pack', tree(good()), '-o'])).toBe(2);
+    expect(err.join('')).toContain('-o needs a filename');
+  });
+
+  it('needs a directory, not a zip', async () => {
+    const root = tree(good());
+    await run(['pack', root, '-o', join(root, 'built.zip')]);
+    out.length = 0;
+
+    await expect(run(['pack', join(root, 'built.zip')])).rejects.toThrowError(/Not a directory/);
   });
 });
