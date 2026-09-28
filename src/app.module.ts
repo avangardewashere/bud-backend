@@ -14,6 +14,7 @@ import { CourseSpecModule } from './course-spec/course-spec.module.js';
 import { CoursesModule } from './courses/courses.module.js';
 import { HealthModule } from './health/health.module.js';
 import { NotesModule } from './notes/notes.module.js';
+import { ExportModule } from './export/export.module.js';
 import { PrismaModule } from './prisma/index.js';
 import { ProgressModule } from './progress/progress.module.js';
 import { StorageModule } from './storage/index.js';
@@ -97,6 +98,7 @@ import { StorageModule } from './storage/index.js';
     CoursesModule,
     ProgressModule,
     NotesModule,
+    ExportModule,
     HealthModule,
   ],
   providers: [

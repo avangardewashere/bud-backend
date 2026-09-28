@@ -183,6 +183,7 @@ compose.yaml                 local stack: api, postgres, minio, mailpit
 | `POST` | `/auth/logout` | session | Revokes the session server-side |
 | `POST` | `/auth/change-password` | session | Signs out every other session |
 | `GET` | `/me` | session | The signed-in user |
+| `GET` | `/me/export` | session | Everything you own, as a zip. See **Taking your work with you** |
 
 Every route requires a session unless it is marked `@Public()`. A new controller
 cannot leak by omission.
@@ -195,6 +196,28 @@ Errors always have the same shape:
   "path": "/auth/login", "timestamp": "2026-09-18T01:00:00.000Z" }
 ```
 
+---
+
+## Taking your work with you
+
+`GET /me/export` hands a learner a zip of everything Bud holds for them:
+
+- `bud-export.json` — profile, courses, per-session progress, notes, deliverables, the blobs the
+  worksheets saved, and the whole activity history the streak and heatmap are drawn from. Grouped by
+  course rather than dumped as tables, because the point is that a person can read it.
+- `notes/<course>.md` — the same Markdown a course's own Export link produces, built by the same code.
+- `README.md` — what is in it, and what is not.
+
+**Not included, deliberately:** sign-in sessions and your account ids at sign-in providers. The first
+are credentials rather than records; the second identify a person somewhere that is not Bud, so
+exporting them would spread that rather than hand it back. The password was only ever stored as a
+hash and cannot be reversed, so there is nothing to hand back. The README in the zip says all of this,
+because an unqualified "all my data" would be a slightly false promise.
+
+No internal row id appears anywhere in the file: a course is its slug and a session is its key.
+
+It has its own per-user rate limit (6/min). It is the only endpoint that reads every row a learner
+owns in one go, so it is also the cheapest way to make the API do the most work.
 ---
 
 ## Security notes

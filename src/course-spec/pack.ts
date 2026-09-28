@@ -1,7 +1,8 @@
-import { Buffer } from 'node:buffer';
+import type { Buffer } from 'node:buffer';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import yazl from 'yazl';
+
+import { zipFiles } from '../common/zip.js';
 
 /**
  * Turning a directory of course files into the zip an admin uploads.
@@ -45,15 +46,6 @@ const NEVER_PACKED = new Set([
  * has never included zip, so nothing legitimate is lost.
  */
 const NEVER_PACKED_EXTENSIONS = new Set(['.zip']);
-
-/**
- * A fixed timestamp for every entry, so packing the same files twice produces
- * the same bytes. An author can then check that what they are uploading is what
- * they built, and a rebuild in CI is comparable. The zip format stores local
- * time with no zone, so this is deliberately a round number in UTC rather than
- * anything meaningful.
- */
-const FIXED_MTIME = new Date('2020-01-01T00:00:00.000Z');
 
 export interface PackedPackage {
   archive: Buffer;
@@ -116,23 +108,16 @@ export async function packCourseDirectory(dir: string): Promise<PackedPackage> {
   }
 
   const { files, skipped } = courseFilesUnder(dir);
-  const zip = new yazl.ZipFile();
 
-  for (const name of files) {
-    zip.addBuffer(readFileSync(join(dir, name.split('/').join(sep))), name, {
-      mtime: FIXED_MTIME,
-      mode: 0o100644,
-    });
-  }
-
-  zip.end();
-
-  const archive = await new Promise<Buffer>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    zip.outputStream.on('data', (chunk: Buffer) => chunks.push(chunk));
-    zip.outputStream.on('error', reject);
-    zip.outputStream.on('end', () => resolve(Buffer.concat(chunks)));
-  });
+  // Timestamps left to the shared default, which is fixed: the same files twice
+  // produce the same bytes, so an author can tell that what they are uploading
+  // is what they built.
+  const archive = await zipFiles(
+    files.map((name) => ({
+      path: name,
+      content: readFileSync(join(dir, name.split('/').join(sep))),
+    })),
+  );
 
   return { archive, entries: files, skipped };
 }
