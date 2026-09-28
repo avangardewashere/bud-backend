@@ -21,6 +21,20 @@ import { PrismaService } from '../prisma/prisma.service.js';
  * Every query here is scoped to one user id. That is the whole correctness
  * property of this file, and it has a test that plants another learner's work
  * and proves none of it comes back.
+ *
+ * **It buffers.** The whole export is assembled in memory before a byte is sent,
+ * and the largest part of it is `savedWork` — the course-state blobs, which
+ * StateService caps at 32 MiB per learner per course. A real worksheet saves
+ * kilobytes, so in practice this is a small file; the worst case is that cap
+ * times the number of courses someone is enrolled in, doubled while it is turned
+ * into JSON. On a 512 MB instance that is fine for one export of a real account
+ * and not fine for several exports of a deliberately stuffed one.
+ *
+ * Accepted rather than solved, because solving it means streaming the archive to
+ * the response, and a stream that fails after the headers are sent hands the
+ * learner a truncated zip instead of an error — a worse failure for the one
+ * endpoint whose whole purpose is not losing their work. If the ceiling ever
+ * starts to matter: query state per course with a running budget, and stream.
  */
 @Injectable()
 export class ExportService {

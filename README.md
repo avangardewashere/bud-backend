@@ -216,6 +216,12 @@ because an unqualified "all my data" would be a slightly false promise.
 
 No internal row id appears anywhere in the file: a course is its slug and a session is its key.
 
+It buffers the whole archive before sending it. A real worksheet saves kilobytes, so in practice this
+is a small file — but course state is capped at 32 MiB per learner per course, so a deliberately
+stuffed account could make one export expensive. Accepted for now rather than solved: streaming it
+would mean a failure after the headers are sent hands someone a truncated zip instead of an error,
+which is a worse outcome for the one endpoint whose purpose is not losing their work.
+
 It has its own per-user rate limit (6/min). It is the only endpoint that reads every row a learner
 owns in one go, so it is also the cheapest way to make the API do the most work.
 ---
