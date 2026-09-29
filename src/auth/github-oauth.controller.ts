@@ -36,11 +36,29 @@ export const SHELL_SIGN_IN_ERRORS = [
   'github_no_code',
   /** The identity is fine, but this deployment does not accept new accounts. */
   'signup_closed',
+  /**
+   * The identity is fine and signup is open, but GitHub has no *verified*
+   * address to register, and an unverified one must never be matched onto a Bud
+   * account. Mapped by the shell before this was added, not after.
+   */
+  'github_no_verified_email',
   /** Anything else: the token exchange, the profile fetch, the database. */
   'github_failed',
 ] as const;
 
 export type ShellSignInError = (typeof SHELL_SIGN_IN_ERRORS)[number];
+
+/**
+ * Whether an error code is also one of the sentences the shell can render.
+ *
+ * Two lists overlap by design — `signup_closed` and `github_no_verified_email`
+ * are both `ERROR_CODES` and reasons here — and this is the seam. Anything else
+ * a service throws becomes `github_failed`, because the shell has no sentence
+ * for it.
+ */
+function isShellSignInError(code: string): code is ShellSignInError {
+  return (SHELL_SIGN_IN_ERRORS as readonly string[]).includes(code);
+}
 
 /**
  * The GitHub sign-in round trip.
@@ -80,7 +98,7 @@ export class GithubOAuthController {
       // Lax, not Strict: the callback is a cross-site top-level navigation back
       // to us, and Strict would drop this cookie exactly when it is needed.
       sameSite: 'lax',
-      path: '/auth/github',
+      path: this.statePath,
       maxAge: STATE_TTL_SECONDS,
     });
 
@@ -100,7 +118,7 @@ export class GithubOAuthController {
     this.assertEnabled();
 
     const cookie = request.cookies?.[STATE_COOKIE];
-    reply.clearCookie(STATE_COOKIE, { path: '/auth/github' });
+    reply.clearCookie(STATE_COOKIE, { path: this.statePath });
 
     // The user declined on GitHub's screen. Not an error worth logging.
     if (error) {
@@ -138,12 +156,39 @@ export class GithubOAuthController {
       // invite-only" into a generic failure on the shell's sign-in screen —
       // exactly the coupling the frozen error codes exist to avoid.
       const reason: ShellSignInError =
-        cause instanceof AppException && cause.code === 'signup_closed'
-          ? 'signup_closed'
+        cause instanceof AppException && isShellSignInError(cause.code)
+          ? cause.code
           : 'github_failed';
 
       return this.backToShell(reply, reason);
     }
+  }
+
+  /**
+   * The path to scope the state cookie to — the **public** one.
+   *
+   * A browser matches a cookie's `Path` against the URL it is visiting, and that
+   * URL is `API_ORIGIN` plus this route, not this route alone. Hard-coded as
+   * `/auth/github`, it was right only where `API_ORIGIN` has no path — and the
+   * one topology that can have GitHub sign-in on the $0 deploy is exactly the
+   * other kind: the env schema refuses `GITHUB_CLIENT_ID` while `API_ORIGIN` and
+   * `COURSES_ORIGIN` share a host, and its own message says to point
+   * `API_ORIGIN` at the shell's `/api` proxy. Then the cookie sat at
+   * `/auth/github` on the shell's host while GitHub sent the browser to
+   * `/api/auth/github/callback`, the browser withheld it, `verifyState` saw
+   * nothing, and **every** sign-in ended at `?error=github_state_mismatch` —
+   * whose sentence tells the person to start again, which could never work.
+   *
+   * Invisible locally, because there the shell and the API differ by port and
+   * the callback path really is `/auth/github/callback`. Reported from the shell
+   * repo, which reads the failure from the other end.
+   */
+  private get statePath(): string {
+    // Derived from the callback URL rather than rebuilt from API_ORIGIN, so the
+    // cookie's path and the URL GitHub sends the browser to cannot disagree —
+    // whatever shape API_ORIGIN turns out to have. The env schema canonicalises
+    // it, and this holds even if it stops.
+    return new URL(this.github.callbackUrl).pathname.replace(/\/callback$/, '');
   }
 
   private backToShell(reply: FastifyReply, reason: ShellSignInError): void {

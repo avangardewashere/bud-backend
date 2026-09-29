@@ -63,6 +63,28 @@ function compareUrls(a: string, b: string, part: (url: URL) => string): boolean 
 const sameOrigin = (a: string, b: string) => compareUrls(a, b, (url) => url.origin);
 const sameHost = (a: string, b: string) => compareUrls(a, b, (url) => url.host);
 
+/**
+ * An origin setting, canonicalised on the way in.
+ *
+ * Every one of these is joined onto something else downstream — a CORS check
+ * against the browser's `Origin` header, a `redirect_uri` for GitHub, the path a
+ * cookie is scoped to — and a value that merely *parses* is not enough for any
+ * of them. `https://bud.example/api/` built a `redirect_uri` of
+ * `https://bud.example/api//auth/github/callback`, which no OAuth app matches,
+ * and `https://APP.example` never equals the `Origin` a browser sends. Both were
+ * a trailing slash and a capital away from working, on settings a person types
+ * once into a dashboard.
+ *
+ * So the value is normalised here rather than defended against in each consumer:
+ * lower-cased host, no default port, no trailing slash, path kept (the shell's
+ * `/api` proxy needs it). Found by a test asserting the state cookie's path is
+ * one the callback URL matches.
+ */
+const originSetting = z.url().transform((value) => {
+  const url = new URL(value);
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+});
+
 export const envSchema = z
   .object({
     // runtime
@@ -87,7 +109,7 @@ export const envSchema = z
     TRUST_PROXY: optionalString,
 
     // origins
-    APP_ORIGIN: z.url(),
+    APP_ORIGIN: originSetting,
     /**
      * Where to send a browser when a sign-in redirect fails — the shell's own
      * sign-in route, which the API cannot know. Hardcoding it once meant every
@@ -95,8 +117,8 @@ export const envSchema = z
      * failure being reported.
      */
     APP_SIGN_IN_PATH: z.string().startsWith('/').default('/login'),
-    COURSES_ORIGIN: z.url(),
-    API_ORIGIN: z.url(),
+    COURSES_ORIGIN: originSetting,
+    API_ORIGIN: originSetting,
     /**
      * Port for course content. Course files must be served from a different
      * *host* to the shell, not merely a different port, because cookies ignore

@@ -20,6 +20,9 @@ describe('the sign-in error values the shell renders', () => {
       'github_state_mismatch',
       'github_no_code',
       'signup_closed',
+      // Added after the shell had mapped it, which is the order these have to
+      // change in: a value the shell does not know renders as nothing.
+      'github_no_verified_email',
       'github_failed',
     ]);
   });

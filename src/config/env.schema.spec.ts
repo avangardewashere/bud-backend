@@ -107,6 +107,29 @@ describe('validateEnv', () => {
     ).toThrowError(/COURSES_ORIGIN must differ/);
   });
 
+  it.each([
+    ['a trailing slash', 'https://bud.example/', 'https://bud.example'],
+    ['a trailing slash after a path', 'https://bud.example/api/', 'https://bud.example/api'],
+    ['an upper-case host', 'https://BUD.example', 'https://bud.example'],
+    ['an explicit default port', 'https://bud.example:443', 'https://bud.example'],
+  ])('canonicalises an origin written with %s', (_case, written, expected) => {
+    // These settings are joined onto other things downstream — a CORS check
+    // against the browser's Origin header, GitHub's redirect_uri, the path a
+    // cookie is scoped to — and a value that merely parses satisfies none of
+    // them. `https://bud.example/api/` produced a redirect_uri of
+    // `https://bud.example/api//auth/github/callback`, which matches no OAuth
+    // app; an upper-case host never equals the Origin a browser sends.
+    expect(validateEnv({ ...baseEnv, API_ORIGIN: written }).API_ORIGIN).toBe(expected);
+  });
+
+  it('keeps the path of a proxied API origin', () => {
+    // The shell serves the API under /api, and that prefix is load-bearing:
+    // it is what the OAuth callback URL and its cookie path are built from.
+    expect(validateEnv({ ...baseEnv, API_ORIGIN: 'https://bud.example/api' }).API_ORIGIN).toBe(
+      'https://bud.example/api',
+    );
+  });
+
   it('reports a malformed origin as a configuration error, not a TypeError', () => {
     // The GitHub rule compares parsed hosts, and refinements run even when a
     // field has already failed its own url() check — so this used to throw a

@@ -1,7 +1,6 @@
 import {
   BadGatewayException,
   BadRequestException,
-  ForbiddenException,
   HttpStatus,
   Injectable,
   Logger,
@@ -238,8 +237,10 @@ export class GithubOAuthService {
     }
 
     if (!profile.email) {
-      throw new ForbiddenException(
+      throw new AppException(
+        'github_no_verified_email',
         'Your GitHub account has no verified email address, so there is nothing to register.',
+        HttpStatus.FORBIDDEN,
       );
     }
 

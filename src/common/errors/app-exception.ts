@@ -23,6 +23,12 @@ export const ERROR_CODES = [
   'signup_closed',
   'invite_invalid',
   'email_taken',
+  /**
+   * Never reaches a JSON body: the OAuth callback catches it and redirects to
+   * the shell. It is here so that callback can branch on a code rather than on
+   * the wording of a message, which is the rule at the top of this file.
+   */
+  'github_no_verified_email',
 
   // course packages
   'course_version_exists',
