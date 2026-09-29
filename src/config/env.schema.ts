@@ -110,6 +110,20 @@ export const envSchema = z
 
     // signup
     SIGNUP_MODE: z.enum(['invite_only', 'open', 'closed']).default('invite_only'),
+    /**
+     * Required to boot with `SIGNUP_MODE=open`, and named after what it admits.
+     *
+     * Open signup cannot be made enumeration-proof here. `POST /auth/register`
+     * signs the new account in as it creates it, so the answer differs — 201
+     * with a cookie, or 409 — and that difference *is* the account-existence
+     * oracle. Hiding it means not answering until the address is proven, which
+     * means mail, which does not exist (nothing reads SMTP_* below). See the
+     * refusal in the superRefine, and README's security-review table.
+     *
+     * So the choice is deliberate rather than blocked: an operator who wants a
+     * public front door can have one, having typed the reason it is a trade-off.
+     */
+    SIGNUP_OPEN_ACK_ENUMERATION: boolEnv('false'),
 
     // github oauth
     GITHUB_CLIENT_ID: optionalString,
@@ -136,9 +150,20 @@ export const envSchema = z
     S3_FORCE_PATH_STYLE: boolEnv('true'),
 
     // mail
-    SMTP_HOST: z.string().min(1).default('localhost'),
-    SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(1025),
-    SMTP_FROM: z.string().min(1).default('Bud <no-reply@bud.local>'),
+    /**
+     * Declared, read by nothing: there is no mail flow yet (Phase 2).
+     *
+     * Optional rather than defaulted, and an empty value counts as unset — the
+     * way `.env` files and compose spell it. `.default()` fires only on
+     * `undefined`, so `SMTP_HOST=` in a copied `.env.prod.example` used to fail
+     * `min(1)` and abort boot over a setting nothing reads. And when the mail
+     * flow does land it must be able to tell "not configured" from "configured
+     * as localhost", or a production instance would post mail into the void
+     * instead of refusing to start.
+     */
+    SMTP_HOST: optionalString,
+    SMTP_PORT: optionalPort,
+    SMTP_FROM: optionalString,
 
     // rate limiting
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(2000),
@@ -193,6 +218,23 @@ export const envSchema = z
         message:
           'GitHub sign-in would set the session cookie on the host that serves course content ' +
           '(API_ORIGIN and COURSES_ORIGIN share a host). Point API_ORIGIN at the shell’s /api proxy.',
+      });
+    }
+
+    // Open signup leaks which addresses have accounts, and cannot stop doing so
+    // without a way to reach the address. One-directional on purpose: a stray
+    // acknowledgement next to invite_only or closed is accepted and ignored, so
+    // turning the front door back off never fails boot.
+    if (env.SIGNUP_MODE === 'open' && !env.SIGNUP_OPEN_ACK_ENUMERATION) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SIGNUP_MODE'],
+        message:
+          'SIGNUP_MODE=open lets anyone test whether an address has an account: register ' +
+          'answers 409 for a taken address and 201 for a free one. Answering identically ' +
+          'instead needs a mail flow to prove the address, and Bud has none yet. To accept ' +
+          'that trade-off, set SIGNUP_OPEN_ACK_ENUMERATION=true. To avoid it, leave ' +
+          'SIGNUP_MODE at invite_only and hand out invites with `npm run invite`.',
       });
     }
 

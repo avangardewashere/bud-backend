@@ -53,9 +53,12 @@ services:
       # R2 and S3 use virtual-hosted addressing; only MinIO needs path style.
       S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
 
-      SMTP_HOST: ${SMTP_HOST:-localhost}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_FROM: ${SMTP_FROM:-Bud <no-reply@bud.local>}
+      # Passed through as written, empty included: nothing reads them yet, and
+      # substituting a localhost default here would tell a future mail module
+      # that mail is configured when it is not.
+      SMTP_HOST: ${SMTP_HOST-}
+      SMTP_PORT: ${SMTP_PORT-}
+      SMTP_FROM: ${SMTP_FROM-}
 
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-2000}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}

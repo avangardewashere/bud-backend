@@ -187,6 +187,16 @@ async function bootstrap(): Promise<void> {
     );
   }
 
+  if (config.get('SIGNUP_MODE') === 'open') {
+    // Boot already refused unless SIGNUP_OPEN_ACK_ENUMERATION is set, so this is
+    // not news to whoever configured it — it is news to whoever reads the logs
+    // six months later and wonders why anyone can ask which addresses exist.
+    logger.warn(
+      'SIGNUP_MODE=open: anyone can register, and register answers differently for an address ' +
+        'that already has an account. Acknowledged via SIGNUP_OPEN_ACK_ENUMERATION.',
+    );
+  }
+
   // Course content. Unset in development while the shell serves courses itself.
   const coursesPort = config.get('COURSES_PORT');
 

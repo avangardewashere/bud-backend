@@ -1,7 +1,6 @@
 import {
   BadRequestException,
-  ConflictException,
-  ForbiddenException,
+  HttpStatus,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -9,6 +8,7 @@ import {
 import { createHash, randomBytes } from 'node:crypto';
 import { Prisma, type Role, type User } from '@prisma/client';
 
+import { AppException } from '../common/errors/app-exception.js';
 import { AppConfigService } from '../config/app-config.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { PublicUser } from './auth.types.js';
@@ -45,11 +45,29 @@ export class AuthService {
 
   // ── registration ──────────────────────────────────────────────────────────
 
+  /**
+   * The order here is the anti-enumeration property, not a style choice.
+   *
+   * Under the default `invite_only`, every refusal is decided before the
+   * database is asked anything about the email address: `consumeInvitePrecheck`
+   * looks up an invite by token hash and nothing else. So a caller without a
+   * valid invite cannot learn whether an address has an account — not because
+   * the messages are careful, but because the code never finds out.
+   *
+   * What remains, deliberately: the holder of a valid unused invite sees 409
+   * `email_taken` if that one address registered in the meantime. They were
+   * issued the invite for it, so they already knew the address.
+   *
+   * Under `SIGNUP_MODE=open` there is no invite, and the 409 is an
+   * account-existence oracle for anyone. That is why boot refuses `open`
+   * without `SIGNUP_OPEN_ACK_ENUMERATION`; see config/env.schema.ts.
+   * auth.service.spec.ts pins all of this.
+   */
   async register(input: RegisterInput): Promise<User> {
     const signupMode = this.config.get('SIGNUP_MODE');
 
     if (signupMode === 'closed') {
-      throw new ForbiddenException('Signup is closed.');
+      throw new AppException('signup_closed', 'Signup is closed.', HttpStatus.FORBIDDEN);
     }
 
     const invite =
@@ -81,7 +99,11 @@ export class AuthService {
           });
 
           if (count !== 1) {
-            throw new ConflictException('That invite has already been used.');
+            throw new AppException(
+              'invite_invalid',
+              'That invite has already been used.',
+              HttpStatus.CONFLICT,
+            );
           }
         }
 
@@ -93,8 +115,13 @@ export class AuthService {
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        // Unique violation on email. Same message either way — see the note in login().
-        throw new ConflictException('That email address is already registered.');
+        // Unique violation on email. Reachable only after the invite checked out
+        // (or under SIGNUP_MODE=open) — see the docblock on register().
+        throw new AppException(
+          'email_taken',
+          'That email address is already registered.',
+          HttpStatus.CONFLICT,
+        );
       }
       throw error;
     }
@@ -106,7 +133,11 @@ export class AuthService {
    */
   private async consumeInvitePrecheck(token: string | undefined, email: string) {
     if (!token) {
-      throw new ForbiddenException('Signup is invite-only. An invite token is required.');
+      throw new AppException(
+        'invite_invalid',
+        'Signup is invite-only. An invite token is required.',
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     const invite = await this.prisma.invite.findUnique({
@@ -114,12 +145,22 @@ export class AuthService {
     });
 
     if (!invite || invite.revokedAt || invite.acceptedAt || invite.expiresAt <= new Date()) {
-      throw new ForbiddenException('That invite is invalid or has expired.');
+      throw new AppException(
+        'invite_invalid',
+        'That invite is invalid or has expired.',
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     // The invite is addressed to a person; it is not a transferable signup code.
-    if (invite.email.toLowerCase() !== email) {
-      throw new ForbiddenException('That invite was issued for a different email address.');
+    // Comparing the two addresses says nothing about whether either has an
+    // account: both sides of this comparison came from the caller and the invite.
+    if (invite.email.trim().toLowerCase() !== email) {
+      throw new AppException(
+        'invite_invalid',
+        'That invite was issued for a different email address.',
+        HttpStatus.FORBIDDEN,
+      );
     }
 
     return invite;
@@ -218,7 +259,11 @@ export class AuthService {
   ): Promise<{ token: string; id: string; expiresAt: Date }> {
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing && !existing.deletedAt) {
-      throw new ConflictException('That email address already has an account.');
+      throw new AppException(
+        'email_taken',
+        'That email address already has an account.',
+        HttpStatus.CONFLICT,
+      );
     }
 
     const token = randomBytes(32).toString('base64url');

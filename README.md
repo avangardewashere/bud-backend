@@ -234,12 +234,21 @@ owns in one go, so it is also the cheapest way to make the API do the most work.
 - **Passwords**: argon2id, OWASP baseline parameters. Hashes made with weaker
   parameters are upgraded on the next successful login.
 - **No account enumeration**: login spends the same time and returns the same
-  error whether the email exists or not.
+  error whether the email exists or not — the dummy hash it verifies against is
+  built during boot, so even the first login of a cold instance costs what a
+  wrong password costs. Registration goes further than matching its answers: in
+  the default invite-only mode every refusal is decided from the invite token
+  alone, so the code never learns whether the address has an account. Both
+  properties are pinned — structurally, not by message — in
+  `src/auth/auth.service.spec.ts` and `test/e2e/register-enumeration.e2e-spec.ts`.
 - **Invites**: only the SHA-256 of the token is stored. Invites are bound to an
   email and claimed atomically, so two racing signups cannot both use one.
 - **Config**: boot fails if `COURSES_ORIGIN` equals `APP_ORIGIN` (that would
-  break the course sandbox), if cookies are insecure in production, or if a seed
-  password is set in production.
+  break the course sandbox), if cookies are insecure in production, if a seed
+  password is set in production, or if `SIGNUP_MODE=open` without
+  `SIGNUP_OPEN_ACK_ENUMERATION=true` — open signup cannot hide whether an
+  address already has an account, and that is worth typing out rather than
+  discovering.
 - **Logs**: cookies, auth headers, passwords and invite tokens are redacted.
 - **Who is calling**: rate limits and the sign-in brake key on the caller's
   address, so the API believes `X-Forwarded-For` only as far as a proxy it was
@@ -272,23 +281,33 @@ are deliberate choices, not drift:
 
 ## Deploying
 
-Everything below is written and verified except the parts that need your
-accounts. The production image has been built and booted in `NODE_ENV=production`
-against a real Postgres and a real MinIO; what has *not* happened is a push to a
-remote, so **CI has never actually executed**.
+There are two deployments in this repo, and they are not alternatives in
+importance: one is what actually runs, the other is what to use when you own a
+server.
 
-### What only you can do
+**The live one — Vercel + Render + Neon, at $0.** Steps, secrets and the current
+state are in `Planning/Deploy-Guide.md`; the service itself is declared in
+`render.yaml`. CI runs on every push (`ci.yml`: checks, two e2e legs, the
+production image, and the Neon migration job), so the pipeline is no longer the
+unproven part — what is outstanding is in the deploy guide, and it needs the
+owner's accounts rather than more code.
 
-1. **Create the repositories and push.** Neither repo has a git remote, so
-   `ci.yml` has never run. This is the single largest untested thing in the
-   project — the pipeline meant to protect it is itself unproven.
-2. **A VPS** (Hetzner CX22 class is plenty) with Docker installed, and DNS for
+### The VPS deployment, for a server you own
+
+Bud is self-hosted software, so the Docker-and-Caddy path is kept and still
+works: it is the only arrangement that gives course content its own hostname
+rather than sharing the API's port. It needs things the $0 arrangement
+deliberately does without:
+
+1. **A VPS** (Hetzner CX22 class is plenty) with Docker installed, and DNS for
    `api.`, `courses.` and `app.` pointing at it.
-3. **Object storage** — a Cloudflare R2 bucket and an access key.
-4. **Repository secrets** for `deploy.yml`: `DEPLOY_HOST`, `DEPLOY_USER`,
+2. **Object storage** — any S3-compatible bucket and an access key (Cloudflare
+   R2, Neon Object Storage, MinIO on the same box).
+3. **Repository secrets** for `deploy.yml`: `DEPLOY_HOST`, `DEPLOY_USER`,
    `DEPLOY_SSH_KEY`, `DEPLOY_PATH`, and a `BUD_DOMAIN` variable.
 
-### What is already done
+The production image has been built and booted in `NODE_ENV=production` against a
+real Postgres and a real MinIO.
 
 ```bash
 # On the server, once:
@@ -344,7 +363,7 @@ limitation of one configuration.
 |---|---|
 | **OAuth authorization codes were written to the logs.** `pino-http` logs `req.url` verbatim, so `/auth/github/callback?code=…&state=…` put a credential exchangeable for an access token into every log line — and logs reach more people and systems than the database does | **Fixed.** A request serializer redacts the values of sensitive query parameters while keeping their names, so `?cursor=` and `?limit=` still make list endpoints debuggable |
 | **Unpublished course content stayed readable.** The catalog 404s a draft, but the content origin served any version ever uploaded to anyone who guessed a slug and a version number. Unpublishing hid a course while its files stayed public — a withdrawal that withdrew nothing | **Fixed.** The origin now serves only the version the catalog is serving, cached for 30s so an asset request is not a database round trip. A rollback is still a pointer change, because storage keeps every version |
-| **`POST /auth/register` distinguishes a taken email** with a 409 | **Documented, not fixed.** Unreachable under `SIGNUP_MODE=invite_only` (the default and the deployed setting): an invite is bound to an email, so anyone who can reach that path already knows the address. Under `SIGNUP_MODE=open` it is a real enumeration vector, and the fix is to answer identically and send mail — which needs the mail flow that does not exist yet. **Do not set `SIGNUP_MODE=open` until it does.** |
+| **`POST /auth/register` distinguishes a taken email** with a 409 | **Gated and pinned; not fixed.** Under `SIGNUP_MODE=invite_only` (the default and the deployed setting) it is unreachable *structurally*, not just quietly: every refusal is decided from the invite token alone, so no user row is read and no password is hashed before the invite checks out — asserted in `src/auth/auth.service.spec.ts` and over HTTP in `test/e2e/register-enumeration.e2e-spec.ts`. What remains is that the holder of a valid unused invite sees 409 for the one address their invite names, which they were given the invite for. Under `SIGNUP_MODE=open` the 409 is a real enumeration vector and still is: answering identically means not answering until the address is proven, which means mail, which does not exist. So that mode now refuses to boot unless `SIGNUP_OPEN_ACK_ENUMERATION=true` says the operator accepts it. |
 
 Two things the review confirmed rather than changed: no endpoint takes a
 user-supplied URL and fetches it, so there is no SSRF surface; and every `/me`
@@ -371,8 +390,22 @@ tamper with.
 - **Login throttle is in-memory**, so it is per-instance. Exact at the Small tier
   (one instance); move it to Redis alongside sessions when a second replica
   appears. See `src/auth/login-throttle.service.ts`.
-- **Object storage and mail** are configured but not used until Phase 1 (course
-  upload) and Phase 2 (invites by email).
+- **Object storage** is in use since Phase 1 (course upload). **Mail** is still
+  only declared: `SMTP_HOST`, `SMTP_PORT` and `SMTP_FROM` are validated on boot
+  and read by nothing, and they are optional, so leaving them empty is how you
+  say "no mail". Two things wait on it — invites by email, and an enumeration-safe
+  open signup — and neither is merely unbuilt: with no domain it is not yet known
+  whether a free transactional-mail account will accept a single verified sender,
+  or whether a Render free instance may talk SMTP outbound at all.
+- **Self-service signup is fenced, not fixed.** `SIGNUP_MODE=open` needs
+  `SIGNUP_OPEN_ACK_ENUMERATION=true` to boot, because register answers
+  differently for an address that already has an account and cannot stop without
+  mail. If you ever do want it on, build a signup budget first — modelled on
+  `src/auth/login-throttle.service.ts` — because the global rate limit keys on
+  the caller's address, and behind the shell's `/api` proxy that is one bucket
+  for the whole world. A hard refusal was considered and rejected: GitHub sign-in
+  needs `open` to register a new account, and that path is not an oracle, since
+  the address comes from GitHub's verified list rather than from the caller.
 - ~~Sentry~~ — **done.** Inert without `SENTRY_DSN`. Reports 5xx only: an error
   tracker full of 401s is one nobody reads. Cookies, auth headers and request
   bodies are stripped, and only a user *id* is attached — never an email.

@@ -102,6 +102,57 @@ describe('validateEnv', () => {
     ).toThrowError(/SEED_ADMIN_PASSWORD must not be set in production/);
   });
 
+  describe('open signup', () => {
+    it('refuses to boot without the acknowledgement, naming both variables', () => {
+      // Open signup answers differently for an address that already has an
+      // account, and cannot stop doing so without a way to reach the address.
+      // The refusal is the whole fence, so it is worth pinning.
+      let message = '';
+      try {
+        validateEnv({ ...baseEnv, SIGNUP_MODE: 'open' });
+      } catch (error) {
+        message = (error as Error).message;
+      }
+
+      expect(message).toMatch(/SIGNUP_MODE/);
+      expect(message).toMatch(/SIGNUP_OPEN_ACK_ENUMERATION/);
+    });
+
+    it('boots when the operator acknowledges what it costs', () => {
+      const env = validateEnv({
+        ...baseEnv,
+        SIGNUP_MODE: 'open',
+        SIGNUP_OPEN_ACK_ENUMERATION: 'true',
+      });
+
+      expect(env.SIGNUP_MODE).toBe('open');
+    });
+
+    it('needs no acknowledgement for invite_only or closed', () => {
+      expect(() => validateEnv({ ...baseEnv, SIGNUP_MODE: 'closed' })).not.toThrow();
+      expect(() => validateEnv({ ...baseEnv, SIGNUP_MODE: 'invite_only' })).not.toThrow();
+    });
+
+    it('accepts a stray acknowledgement without opening anything', () => {
+      // One-directional on purpose: an operator who turns the front door back
+      // off should not then have to remember to remove this too.
+      const env = validateEnv({ ...baseEnv, SIGNUP_OPEN_ACK_ENUMERATION: 'true' });
+
+      expect(env.SIGNUP_MODE).toBe('invite_only');
+    });
+  });
+
+  it('boots with the mail settings left empty, since nothing reads them yet', () => {
+    // `SMTP_HOST=` is how .env.prod.example spells "no mail configured", and a
+    // `.default()` fires only on undefined — so the empty value hit min(1) and
+    // aborted boot over a setting no code reads.
+    const env = validateEnv({ ...baseEnv, SMTP_HOST: '', SMTP_PORT: '', SMTP_FROM: '' });
+
+    expect(env.SMTP_HOST).toBeUndefined();
+    expect(env.SMTP_PORT).toBeUndefined();
+    expect(env.SMTP_FROM).toBeUndefined();
+  });
+
   it('rejects half-configured GitHub OAuth', () => {
     expect(() => validateEnv({ ...baseEnv, GITHUB_CLIENT_ID: 'id' })).toThrowError(
       /must be set together/,
