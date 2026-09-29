@@ -1,4 +1,11 @@
-import { ForbiddenException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  ForbiddenException,
+  HttpStatus,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { User } from '@prisma/client';
 
@@ -109,12 +116,16 @@ export class GithubOAuthService {
 
     if (!response.ok || !body.access_token) {
       // GitHub answers 200 with an error body for a used or expired code.
-      throw new AppException(
-        'invite_invalid',
-        'GitHub did not accept that sign-in attempt.',
-        HttpStatus.BAD_REQUEST,
-        body.error,
-      );
+      //
+      // No `code`: this is GitHub failing, not a Bud invite, and it used to be
+      // thrown as `invite_invalid`, which is a sentence about invites that this
+      // has nothing to do with. Nothing branches on it — the callback turns
+      // every failure that is not `signup_closed` into `github_failed` for the
+      // shell — so a derived code is honest where a borrowed one was not.
+      throw new BadRequestException({
+        message: 'GitHub did not accept that sign-in attempt.',
+        ...(body.error ? { detail: body.error } : {}),
+      });
     }
 
     return body.access_token;
@@ -129,11 +140,8 @@ export class GithubOAuthService {
 
     const response = await fetch(USER_URL, { headers });
     if (!response.ok) {
-      throw new AppException(
-        'invite_invalid',
-        'Could not read your GitHub profile.',
-        HttpStatus.BAD_GATEWAY,
-      );
+      // Also not an invite problem: GitHub answered, and not with a profile.
+      throw new BadGatewayException('Could not read your GitHub profile.');
     }
 
     const user = (await response.json()) as {
@@ -217,9 +225,15 @@ export class GithubOAuthService {
       // There is no invite flow through OAuth on purpose: an invite is bound to
       // an email address, and letting GitHub vouch for one would make the
       // invite the weaker of the two checks.
-      throw new ForbiddenException(
+      // Carries a code because the callback has to recognise this case to send
+      // the shell the right sentence, and it used to recognise it by matching
+      // English against this very message. See the reason list in
+      // github-oauth.controller.ts.
+      throw new AppException(
+        'signup_closed',
         'Signup is not open. Ask for an invite and register with an email address first, ' +
           'then sign in with GitHub.',
+        HttpStatus.FORBIDDEN,
       );
     }
 

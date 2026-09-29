@@ -147,9 +147,11 @@ describe('GithubOAuthService', () => {
       prisma.user.findUnique.mockResolvedValue({ id: 'user-3', deletedAt: new Date() });
 
       // Falls through to registration, which invite_only then refuses.
-      await expect(makeService({}, prisma).resolveUser(profile)).rejects.toThrow(
-        /Signup is not open/,
-      );
+      // On the code, because the callback branches on it to tell the shell to
+      // say "invite-only" rather than "something went wrong".
+      await expect(makeService({}, prisma).resolveUser(profile)).rejects.toMatchObject({
+        code: 'signup_closed',
+      });
     });
 
     it('ignores a linked account whose user was deleted', async () => {
@@ -174,7 +176,7 @@ describe('GithubOAuthService', () => {
     it('refuses to register when signup is closed', async () => {
       await expect(
         makeService({ SIGNUP_MODE: 'closed' }, prisma).resolveUser(profile),
-      ).rejects.toThrow(/Signup is not open/);
+      ).rejects.toMatchObject({ code: 'signup_closed' });
     });
 
     it('registers a new user when signup is open', async () => {

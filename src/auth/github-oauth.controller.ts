@@ -2,6 +2,7 @@ import { Controller, Get, HttpStatus, NotFoundException, Query, Req, Res } from 
 import { ApiExcludeEndpoint, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { FastifyReply } from 'fastify';
 
+import { AppException } from '../common/errors/app-exception.js';
 import type { AuthenticatedRequest } from './auth.types.js';
 import { AuthService } from './auth.service.js';
 import { Public } from './decorators/public.decorator.js';
@@ -12,6 +13,34 @@ import { AppConfigService } from '../config/app-config.service.js';
 /** Short-lived, and only has to survive the round trip to GitHub. */
 const STATE_COOKIE = 'bud_oauth_state';
 const STATE_TTL_SECONDS = 600;
+
+/**
+ * Every value this API can put in `?error=` on the shell's sign-in URL.
+ *
+ * **This is a published contract, exactly like `ERROR_CODES`, and it is easy to
+ * miss because it does not travel in a JSON envelope.** The shell maps each of
+ * these to a sentence a person reads, and its own test suite asserts that every
+ * value it knows about becomes one — so renaming a value here does not break a
+ * type anywhere, it just produces an unexplained failure on someone's sign-in
+ * screen. Adding one is a change the shell has to make too: an unmapped value
+ * has no sentence.
+ *
+ * Frozen once published. Add, never rename.
+ */
+export const SHELL_SIGN_IN_ERRORS = [
+  /** The person pressed "Cancel" on GitHub's authorise screen. */
+  'github_declined',
+  /** A forged callback, or a tab left open past the state cookie's ten minutes. */
+  'github_state_mismatch',
+  /** GitHub sent us back without a code, which should not happen. */
+  'github_no_code',
+  /** The identity is fine, but this deployment does not accept new accounts. */
+  'signup_closed',
+  /** Anything else: the token exchange, the profile fetch, the database. */
+  'github_failed',
+] as const;
+
+export type ShellSignInError = (typeof SHELL_SIGN_IN_ERRORS)[number];
 
 /**
  * The GitHub sign-in round trip.
@@ -103,8 +132,13 @@ export class GithubOAuthController {
     } catch (cause) {
       // Redirect rather than render: the browser is mid-navigation and the
       // person is looking at the shell, not at an API response.
-      const reason =
-        cause instanceof Error && cause.message.includes('Signup is not open')
+      // On the code, not on the message. This used to read
+      // `cause.message.includes('Signup is not open')`, so rewording a sentence
+      // in github-oauth.service.ts would have quietly turned "signup is
+      // invite-only" into a generic failure on the shell's sign-in screen —
+      // exactly the coupling the frozen error codes exist to avoid.
+      const reason: ShellSignInError =
+        cause instanceof AppException && cause.code === 'signup_closed'
           ? 'signup_closed'
           : 'github_failed';
 
@@ -112,7 +146,7 @@ export class GithubOAuthController {
     }
   }
 
-  private backToShell(reply: FastifyReply, reason: string): void {
+  private backToShell(reply: FastifyReply, reason: ShellSignInError): void {
     const url = new URL(this.config.get('APP_SIGN_IN_PATH'), this.config.get('APP_ORIGIN'));
     url.searchParams.set('error', reason);
     void reply.redirect(url.toString(), HttpStatus.FOUND);
