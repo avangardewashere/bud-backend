@@ -27,10 +27,15 @@ services:
     # shell's login page also calls /health to wake the service. It must stay
     # database-free; health.controller.spec.ts enforces that.
     healthCheckPath: /health
-    # Deploy a commit only once every CI check on it has passed — including
-    # ci.yml's migrate job, which applies migrations to Neon first. So new code
-    # never runs against an old schema, and a broken commit never spends the
-    # free build minutes.
+    # Deploy a commit only once every CI check on it has passed, so a broken
+    # commit never spends the free build minutes. That includes ci.yml's migrate
+    # job, which applies Neon's migrations and *fails* — rather than passing
+    # quietly — when it has no DATABASE_URL_UNPOOLED secret to migrate with. So
+    # new code does not run against an old schema.
+    #
+    # The one exception is the MIGRATIONS_EXTERNAL repository variable, which
+    # says the operator applies migrations by hand (Planning/Deploy-Guide.md
+    # step 2). While it is set, this gate says nothing about the schema.
     autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV

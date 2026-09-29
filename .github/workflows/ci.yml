@@ -246,6 +246,19 @@ jobs:
   # would then stop even the last good release from starting. Here it runs
   # once, before the new code can be deployed: render.yaml deploys only when
   # every check on the commit has passed, this job included.
+  #
+  # Which makes this job the *only* automated migration path in the system
+  # (docker/Dockerfile says so too), and so it **fails** when it cannot migrate
+  # rather than passing green having done nothing. It used to do the latter, and
+  # the effect was a lie in two other files: render.yaml promised that new code
+  # never runs against an old schema, on the strength of a check that exited 0
+  # with a note saying it had skipped. A deploy released on `checksPass` would
+  # then boot fine — /health touches no database — and 500 on every request.
+  #
+  # The deliberate exception is the MIGRATIONS_EXTERNAL repository variable, for
+  # an operator who applies migrations by hand (Planning/Deploy-Guide.md step 2).
+  # Same idiom as DEPLOY_ENABLED in deploy.yml: while it is set, a green run here
+  # says nothing about the schema, and the job's own log says so.
   migrate:
     runs-on: ubuntu-latest
     needs: [e2e]
@@ -269,10 +282,19 @@ jobs:
           # Neon's DIRECT connection string — migrations fail through the
           # pooler. Set as a repository secret; see Planning/Deploy-Guide.md.
           DATABASE_URL: ${{ secrets.DATABASE_URL_UNPOOLED }}
+          # Set to 'true' only while the schema is applied by hand. Unset it once
+          # the secret above exists. An unknown variable is the empty string here,
+          # so a misspelling fails closed — which is why both messages below name
+          # the variable.
+          MIGRATIONS_EXTERNAL: ${{ vars.MIGRATIONS_EXTERNAL }}
         run: |
           if [ -z "$DATABASE_URL" ]; then
-            echo "::notice::No DATABASE_URL_UNPOOLED secret: no production database to migrate."
-            exit 0
+            if [ "$MIGRATIONS_EXTERNAL" = "true" ]; then
+              echo "::notice::MIGRATIONS_EXTERNAL=true, so a missing DATABASE_URL_UNPOOLED secret is not an error. This job migrated nothing: the production schema is the operator's responsibility (Planning/Deploy-Guide.md step 2), and a green run of this job is not evidence that it matches this commit."
+              exit 0
+            fi
+            echo "::error::No DATABASE_URL_UNPOOLED secret, so this job cannot apply migrations — and render.yaml releases this commit on checksPass, which would deploy new code against a schema nothing has checked. Set the DATABASE_URL_UNPOOLED repository secret to Neon's DIRECT connection string (no -pooler in the host), or set the MIGRATIONS_EXTERNAL repository variable to 'true' if you run 'npx prisma migrate deploy' yourself. See Planning/Deploy-Guide.md step 2."
+            exit 1
           fi
           case "$DATABASE_URL" in
             *-pooler.*)
@@ -281,6 +303,9 @@ jobs:
               ;;
           esac
           npx prisma migrate deploy
+          # Proves the schema now matches this commit, rather than only that a
+          # secret was configured. One extra connection per push to main.
+          npx prisma migrate status
 
   image:
     runs-on: ubuntu-latest

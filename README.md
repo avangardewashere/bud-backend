@@ -292,6 +292,14 @@ production image, and the Neon migration job), so the pipeline is no longer the
 unproven part — what is outstanding is in the deploy guide, and it needs the
 owner's accounts rather than more code.
 
+CI's `migrate` job is the only thing that applies migrations to Neon — nothing
+migrates on boot (`docker/Dockerfile`), and `render.yaml` releases a deploy on
+`checksPass` — so it **fails** when the `DATABASE_URL_UNPOOLED` secret is
+missing, rather than passing green having done nothing. Set that secret, or set
+the `MIGRATIONS_EXTERNAL` repository variable to `true` to say the schema is
+applied by hand. Until one of those is true, pushes to `main` are red on purpose:
+a green run there would mean "this commit's schema is live", and it would not be.
+
 ### The VPS deployment, for a server you own
 
 Bud is self-hosted software, so the Docker-and-Caddy path is kept and still
