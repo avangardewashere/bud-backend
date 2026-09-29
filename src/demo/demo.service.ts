@@ -419,7 +419,25 @@ export class DemoService implements OnModuleInit, OnModuleDestroy {
     // After the transaction, not before: a reset that failed should be retried
     // by the next visitor rather than suppressed for the idle window.
     this.lastResetAt = Date.now();
-    this.logger.log('Demo account reset to its sample progress');
+
+    if (course?.currentVersion) {
+      this.logger.log('Demo account reset to its sample progress');
+      return;
+    }
+
+    // Wiped, but there was no sample to write back, because nothing is
+    // published yet. Said out loud: this is the state of a freshly deployed
+    // instance before its first course is uploaded, and the visitor is looking
+    // at an empty demo. Claiming a reset "to its sample progress" here sent the
+    // one person who could fix it looking for a bug in the reset instead.
+    //
+    // The stamp stays. It exists so a reset does not read as idleness and
+    // trigger another one under the next visitor, and that is true whether or
+    // not there was anything to restore.
+    this.logger.warn(
+      'Demo account cleared, but no course is published, so there is nothing for it to show. ' +
+        'Publish a course; the next visitor after the idle window sees the sample progress.',
+    );
   }
 
   /**

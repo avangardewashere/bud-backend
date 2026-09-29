@@ -1,3 +1,4 @@
+import { HttpStatus } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 
 import type { PrismaService } from '../prisma/prisma.service.js';
@@ -38,5 +39,38 @@ describe('HealthController', () => {
 
     expect(await controller.ready()).toMatchObject({ status: 'ok' });
     expect(touched.sort()).toEqual(['database', 'storage']);
+  });
+
+  it('reports degraded storage in the body while staying a 200', async () => {
+    // Deliberate, and load-bearing in two directions. A failing object store
+    // must not take the instance out of rotation — sign-in, the catalog,
+    // progress and the bridge all still work without it — so this resolves
+    // rather than throws. But it means the status code cannot be read as "all
+    // well", which is what scripts/verify-deploy.mjs used to do: it printed a
+    // pass for a deployment that could not serve a single course file. Nothing
+    // pinned either half until now.
+    const controller = new HealthController(
+      { ping: () => Promise.resolve() } as unknown as PrismaService,
+      { ping: () => Promise.reject(new Error('bucket unreachable')) } as unknown as StorageService,
+    );
+
+    await expect(controller.ready()).resolves.toEqual({
+      status: 'degraded',
+      checks: { database: 'ok', storage: 'error' },
+    });
+  });
+
+  it('refuses readiness when the database is gone', async () => {
+    // The other direction: a dead database is not degraded service, it is no
+    // service, so this one does leave rotation.
+    const controller = new HealthController(
+      { ping: () => Promise.reject(new Error('no connection')) } as unknown as PrismaService,
+      { ping: () => Promise.resolve() } as unknown as StorageService,
+    );
+
+    await expect(controller.ready()).rejects.toMatchObject({
+      status: HttpStatus.SERVICE_UNAVAILABLE,
+      response: { status: 'error', checks: { database: 'error', storage: 'ok' } },
+    });
   });
 });

@@ -78,11 +78,26 @@ console.log('The API, directly');
     report('fail', 'GET /ready', error.message);
   } else {
     const body = await response.json().catch(() => ({}));
-    report(
-      response.status === 200 ? 'ok' : 'fail',
-      'GET /ready (database + storage)',
-      `${response.status} in ${ms} ms, checks: ${JSON.stringify(body.checks ?? {})}`,
-    );
+    const detail = `${response.status} in ${ms} ms, checks: ${JSON.stringify(body.checks ?? {})}`;
+
+    // Judged on the body, not the status. /ready answers **200** with
+    // `status: "degraded"` when object storage is unreachable but the database
+    // is fine, and that is deliberate — a degraded subsystem must not take the
+    // instance out of rotation, because sign-in, the catalog, progress and the
+    // bridge all still work. But this script is not a load balancer. It answers
+    // "is this deployment fit to use", and a Bud that cannot serve course files
+    // is not: reading `ok` off the status code called that a pass.
+    if (response.status === 200 && body.status === 'ok') {
+      report('ok', 'GET /ready (database + storage)', detail);
+    } else if (response.status === 200) {
+      report(
+        'fail',
+        `GET /ready is ${body.status ?? 'not ok'}`,
+        `${detail} — the probe stays green on purpose, so this is a real failure the platform will not tell you about`,
+      );
+    } else {
+      report('fail', 'GET /ready (database + storage)', detail);
+    }
   }
 }
 
