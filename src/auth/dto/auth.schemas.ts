@@ -6,12 +6,30 @@ import { z } from 'zod';
  * published spec and the accepted input cannot drift apart.
  */
 
-/** Emails are compared case-insensitively, so normalise once at the edge. */
-export const emailSchema = z
-  .email({ message: 'Must be a valid email address' })
-  .trim()
-  .toLowerCase()
-  .max(320);
+/**
+ * Emails are compared case-insensitively, so normalise once at the edge.
+ *
+ * Normalise *then* validate, in that order. Written the obvious way round —
+ * `z.email().trim().toLowerCase()` — the format check belongs to the base schema
+ * and runs first, so the transforms never saw a padded address:
+ * `" Bob@Example.com "` was rejected as malformed rather than cleaned up, and
+ * the `.trim()` was dead code. Lower-casing happened to work, which is why it
+ * went unnoticed. It matters beyond a stray space: an invite is matched by
+ * comparing this address to the stored one (auth.service.ts), and a learner who
+ * pastes their address with a trailing newline should sign in, not see a
+ * validation error.
+ *
+ * `preprocess` rather than `.pipe()` because of what each publishes. The shell
+ * generates its client from the OpenAPI body schemas, and Zod derives the
+ * *input* side of a pipe from its left-hand schema — a bare `type: string`,
+ * losing `format: email`, `maxLength` and the pattern. Through `preprocess` the
+ * emitted schema is unchanged in both directions, so the contract stays put
+ * while the runtime becomes forgiving about whitespace and case.
+ */
+export const emailSchema = z.preprocess(
+  (value) => (typeof value === 'string' ? value.trim().toLowerCase() : value),
+  z.email({ message: 'Must be a valid email address' }).max(320),
+);
 
 /**
  * Length is the only rule worth enforcing. Composition rules push people

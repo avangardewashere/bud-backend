@@ -18,6 +18,8 @@ import { existsSync } from 'node:fs';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
+import { readEmailArgument } from './email-argument.js';
+
 if (existsSync('.env')) {
   process.loadEnvFile('.env');
 }
@@ -30,17 +32,15 @@ function usage(message: string): never {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const email = args
-    .find((a) => !a.startsWith('--'))
-    ?.trim()
-    .toLowerCase();
+  // Validated with the API's own schema, not a regex of its own: an invite this
+  // accepts and POST /auth/register rejects is a link that can never be
+  // redeemed, and there is no way to tell the invitee why.
+  const parsed = readEmailArgument(args.find((a) => !a.startsWith('--')));
 
-  if (!email) {
-    usage('An email address is required.');
+  if (!parsed.ok) {
+    usage(parsed.problem);
   }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    usage(`"${email}" does not look like an email address.`);
-  }
+  const email = parsed.email;
 
   const role = args.includes('--admin') ? 'admin' : 'learner';
 

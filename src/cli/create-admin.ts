@@ -24,6 +24,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
 import { PasswordService } from '../auth/password.service.js';
+import { readEmailArgument } from './email-argument.js';
 
 if (existsSync('.env')) {
   process.loadEnvFile('.env');
@@ -46,18 +47,19 @@ async function main(): Promise<void> {
 
   // Skip --name and its value. Guarded: with no --name, nameAt + 1 is 0 and an
   // unguarded filter would drop the email itself.
-  const email = args
-    .filter((_, i) => nameAt === -1 || (i !== nameAt && i !== nameAt + 1))
-    .find((a) => !a.startsWith('--'))
-    ?.trim()
-    .toLowerCase();
+  //
+  // Validated with the API's own schema: an address accepted here but refused by
+  // POST /auth/login would create an admin who cannot sign in.
+  const parsed = readEmailArgument(
+    args
+      .filter((_, i) => nameAt === -1 || (i !== nameAt && i !== nameAt + 1))
+      .find((a) => !a.startsWith('--')),
+  );
 
-  if (!email) {
-    fail('An email address is required.');
+  if (!parsed.ok) {
+    fail(parsed.problem);
   }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-    fail(`"${email}" does not look like an email address.`);
-  }
+  const email = parsed.email;
 
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
