@@ -37,6 +37,32 @@ const optionalString = z
   .optional()
   .transform((v) => (v === '' ? undefined : v));
 
+/**
+ * Comparing two origin settings, the way a browser would.
+ *
+ * Parsed rather than compared as strings, because the spelling is not the
+ * origin: a trailing slash, an upper-case host and an explicitly written
+ * default port all describe the same origin as their plain twin.
+ *
+ * Returns false when either side cannot be parsed, which happens more often
+ * than it looks: these refinements run even when a field has already failed its
+ * own `z.url()` check — the docblock in validateEnv used to say otherwise — so
+ * `new URL(…)` here on a malformed value threw a bare `TypeError: Invalid URL`
+ * out of boot, replacing the list of every problem with a stack trace naming no
+ * variable at all. The field's own error is the one worth reporting; a
+ * comparison against a value that is not a URL has nothing to say.
+ */
+function compareUrls(a: string, b: string, part: (url: URL) => string): boolean {
+  try {
+    return part(new URL(a)) === part(new URL(b));
+  } catch {
+    return false;
+  }
+}
+
+const sameOrigin = (a: string, b: string) => compareUrls(a, b, (url) => url.origin);
+const sameHost = (a: string, b: string) => compareUrls(a, b, (url) => url.host);
+
 export const envSchema = z
   .object({
     // runtime
@@ -180,7 +206,14 @@ export const envSchema = z
   .superRefine((env, ctx) => {
     // The whole security model rests on course HTML living somewhere the shell's
     // cookies cannot reach. If these ever match, the isolation is gone.
-    if (env.APP_ORIGIN === env.COURSES_ORIGIN) {
+    //
+    // Compared as origins, not as strings. A browser does not care how a URL was
+    // typed: `http://localhost:3000/`, `http://LOCALHOST:3000` and
+    // `http://localhost:80` beside `http://localhost` are each the same origin
+    // as their plainly-spelled twin, and each one used to boot past this guard
+    // with the sandbox quietly gone. Verified by running the four spellings
+    // through validateEnv.
+    if (sameOrigin(env.APP_ORIGIN, env.COURSES_ORIGIN)) {
       ctx.addIssue({
         code: 'custom',
         path: ['COURSES_ORIGIN'],
@@ -211,7 +244,7 @@ export const envSchema = z
     // that host also serves course content (course content sharing the API's
     // port), a live session would sit on the course origin. Refuse until the
     // callback goes through the shell instead.
-    if (env.GITHUB_CLIENT_ID && new URL(env.API_ORIGIN).host === new URL(env.COURSES_ORIGIN).host) {
+    if (env.GITHUB_CLIENT_ID && sameHost(env.API_ORIGIN, env.COURSES_ORIGIN)) {
       ctx.addIssue({
         code: 'custom',
         path: ['GITHUB_CLIENT_ID'],
@@ -259,9 +292,14 @@ export function validateEnv(raw: Record<string, unknown>): Env {
   const env = withPlatformDefaults(raw);
   const result = envSchema.safeParse(env);
 
-  // Checked beside the schema rather than in its superRefine: Zod skips
-  // refinements once any field has failed, so a missing DATABASE_URL would
+  // Checked beside the schema rather than in its superRefine: Zod skips a
+  // refinement when a key it reads is absent, so a missing DATABASE_URL would
   // hide missing S3 settings until the next boot. Every problem, at once.
+  //
+  // It does *not* skip refinements for a key that is present and invalid — they
+  // run on the parsed-so-far value, which is why the origin comparisons above
+  // have to tolerate a value that is not a URL rather than assume `z.url()`
+  // already rejected it.
   const lines = [
     ...(result.success
       ? []

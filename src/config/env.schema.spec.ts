@@ -85,6 +85,51 @@ describe('validateEnv', () => {
     );
   });
 
+  it.each([
+    ['a trailing slash', 'http://localhost:3000/'],
+    ['an upper-case host', 'http://LOCALHOST:3000'],
+    ['a differently-cased scheme', 'HTTP://localhost:3000'],
+  ])('rejects a courses origin that is the app origin written with %s', (_case, coursesOrigin) => {
+    // A browser reads all of these as the same origin as APP_ORIGIN, so the
+    // sandbox is gone — but a string compare read them as different and booted.
+    expect(() => validateEnv({ ...baseEnv, COURSES_ORIGIN: coursesOrigin })).toThrowError(
+      /COURSES_ORIGIN must differ/,
+    );
+  });
+
+  it('rejects an explicit default port that makes the two origins the same', () => {
+    expect(() =>
+      validateEnv({
+        ...baseEnv,
+        APP_ORIGIN: 'http://localhost',
+        COURSES_ORIGIN: 'http://localhost:80',
+      }),
+    ).toThrowError(/COURSES_ORIGIN must differ/);
+  });
+
+  it('reports a malformed origin as a configuration error, not a TypeError', () => {
+    // The GitHub rule compares parsed hosts, and refinements run even when a
+    // field has already failed its own url() check — so this used to throw a
+    // bare `TypeError: Invalid URL` out of boot, with no variable named and none
+    // of the other problems listed.
+    let error: unknown;
+    try {
+      validateEnv({
+        ...baseEnv,
+        API_ORIGIN: 'not-a-url',
+        GITHUB_CLIENT_ID: 'id',
+        GITHUB_CLIENT_SECRET: 'secret',
+      });
+    } catch (thrown) {
+      error = thrown;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(TypeError);
+    expect((error as Error).message).toMatch(/Invalid environment configuration/);
+    expect((error as Error).message).toMatch(/API_ORIGIN/);
+  });
+
   it('rejects an insecure cookie in production', () => {
     expect(() =>
       validateEnv({ ...baseEnv, NODE_ENV: 'production', COOKIE_SECURE: 'false' }),
