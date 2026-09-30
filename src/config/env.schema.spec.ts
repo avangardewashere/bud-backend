@@ -130,6 +130,56 @@ describe('validateEnv', () => {
     );
   });
 
+  describe('the cookie domain against the courses host', () => {
+    // The origins guard compares two origins, and a cookie domain is wider than
+    // an origin: it is the one setting that can put the session cookie on the
+    // host serving author-written HTML while every other check here passes.
+    const hosted = {
+      ...baseEnv,
+      APP_ORIGIN: 'https://app.bud.example',
+      COURSES_ORIGIN: 'https://courses.bud.example',
+      API_ORIGIN: 'https://app.bud.example/api',
+    };
+
+    it('refuses a parent domain that reaches the courses host', () => {
+      expect(() => validateEnv({ ...hosted, COOKIE_DOMAIN: '.bud.example' })).toThrowError(
+        /COOKIE_DOMAIN/,
+      );
+      // The leading dot is not part of the match, so both spellings are refused.
+      expect(() => validateEnv({ ...hosted, COOKIE_DOMAIN: 'bud.example' })).toThrowError(
+        /COOKIE_DOMAIN/,
+      );
+    });
+
+    it('refuses the courses host itself', () => {
+      expect(() => validateEnv({ ...hosted, COOKIE_DOMAIN: 'courses.bud.example' })).toThrowError(
+        /COOKIE_DOMAIN/,
+      );
+    });
+
+    it('accepts a domain that does not reach it', () => {
+      expect(() => validateEnv({ ...hosted, COOKIE_DOMAIN: 'app.bud.example' })).not.toThrow();
+    });
+
+    it('accepts no cookie domain at all, which is the deployed arrangement', () => {
+      // Unset means a host-only cookie, which is what the shell's /api proxy
+      // wants: the cookie belongs to the shell's own origin and nothing else.
+      expect(validateEnv({ ...hosted }).COOKIE_DOMAIN).toBeUndefined();
+    });
+
+    it('is not fooled by a suffix that is not a domain boundary', () => {
+      // `notbud.example` ends with `bud.example` as a string and is a different
+      // domain, so a substring test here would refuse a valid configuration.
+      expect(() =>
+        validateEnv({
+          ...hosted,
+          COURSES_ORIGIN: 'https://courses.notbud.example',
+          COOKIE_DOMAIN: 'bud.example',
+        }),
+      ).not.toThrow();
+    });
+  });
+
   it('reports a malformed origin as a configuration error, not a TypeError', () => {
     // The GitHub rule compares parsed hosts, and refinements run even when a
     // field has already failed its own url() check — so this used to throw a

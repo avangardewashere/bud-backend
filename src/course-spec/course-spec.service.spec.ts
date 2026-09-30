@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import yazl from 'yazl';
 
+import { ArchiveTooLargeError, DEFAULT_ARCHIVE_LIMITS, extractFiles } from './archive.js';
 import { CourseSpecService } from './course-spec.service.js';
 import type { CourseManifest } from './manifest.schema.js';
 import type { ValidationCode, ValidationReport } from './validation.types.js';
@@ -294,6 +295,78 @@ describe('CourseSpecService', () => {
       );
 
       expect(codes(report)).toContain('disallowed_extension');
+    });
+  });
+
+  describe('an archive that misdescribes itself', () => {
+    /**
+     * The size guard was reported as trusting the central directory — a field
+     * the archive writes about itself. Measured rather than assumed, and the
+     * answer is more specific than the report: the lie is self-defeating,
+     * because yauzl validates each entry's stream against the size it declared
+     * and refuses to hand over more bytes than that. Declare small and you get
+     * small.
+     *
+     * What that guarantee rests on is a library default, which the code never
+     * stated and could not survive being changed. So the cap is now also
+     * enforced on the bytes as they arrive, and these tests hold both halves.
+     */
+    /** Rewrites every declared uncompressed size, in both headers. */
+    function understateSizes(zip: Buffer, claimed: number): Buffer {
+      const patched = Buffer.from(zip);
+      for (let i = 0; i < patched.length - 4; i += 1) {
+        const signature = patched.readUInt32LE(i);
+        if (signature === 0x04034b50) {
+          patched.writeUInt32LE(claimed, i + 22); // local file header
+        }
+        if (signature === 0x02014b50) {
+          patched.writeUInt32LE(claimed, i + 24); // central directory
+        }
+      }
+      return patched;
+    }
+
+    const bigEnough = { content: 'A'.repeat(300 * 1024) };
+
+    it('refuses a package whose entries claim to be smaller than they are', async () => {
+      const honest = await makeZip([
+        { path: 'bud.manifest.json', content: JSON.stringify(realManifest) },
+        { path: 'big.html', ...bigEnough },
+      ]);
+
+      const outcome = await service.validate(understateSizes(honest, 16), {
+        limits: { ...DEFAULT_ARCHIVE_LIMITS, maxTotalUncompressedBytes: 64 * 1024 },
+      });
+
+      expect(outcome.report.ok).toBe(false);
+      expect(codes(outcome.report)).toContain('size_exceeded');
+    });
+
+    it('bounds what extraction holds in memory by itself', async () => {
+      // extractFiles returns every file resident, and had only a per-file cap:
+      // a thousand honest files under that cap are still a thousand files. It
+      // was safe only because its one caller validates first, which is a
+      // property of the caller and not of this function.
+      const archive = await makeZip([
+        { path: 'bud.manifest.json', content: JSON.stringify(realManifest) },
+        { path: 'big.html', ...bigEnough },
+      ]);
+
+      await expect(
+        extractFiles(archive, {
+          ...DEFAULT_ARCHIVE_LIMITS,
+          maxTotalUncompressedBytes: 64 * 1024,
+        }),
+      ).rejects.toThrow(ArchiveTooLargeError);
+    });
+
+    it('extracts a package that fits', async () => {
+      const archive = await realCoursePackage();
+
+      const files = await extractFiles(archive);
+
+      expect(files.get('bud.manifest.json')).toBeDefined();
+      expect([...files.keys()]).toContain(realManifest.sessions[0].entry);
     });
   });
 

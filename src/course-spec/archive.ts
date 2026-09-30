@@ -20,7 +20,16 @@ import { normaliseEntryPath } from './entry-path.js';
 export interface ArchiveLimits {
   /** Cap on the compressed upload. Start at 50 MB (Overall Plan §4). */
   maxArchiveBytes: number;
-  /** Cap on the total declared uncompressed size — the zip-bomb guard. */
+  /**
+   * Cap on the total uncompressed size.
+   *
+   * Enforced twice, and the distinction matters. The *declared* total from the
+   * central directory is checked first, which rejects an honest bomb before a
+   * byte is decompressed — but that number is written by whoever made the
+   * archive and a hostile one simply lies about it. So the same cap is enforced
+   * again against the bytes actually read, cumulatively across entries, which
+   * is the half that cannot be talked out of.
+   */
   maxTotalUncompressedBytes: number;
   /** Cap on any single file we decompress to *inspect* (manifest, HTML). */
   maxReadableFileBytes: number;
@@ -130,32 +139,34 @@ function openZip(buffer: Buffer): Promise<ZipFile> {
   });
 }
 
-function readEntryText(zipfile: ZipFile, entry: Entry, maxBytes: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    zipfile.openReadStream(entry, (err, stream) => {
-      if (err || !stream) {
-        reject(err ?? new Error('Could not open entry'));
-        return;
-      }
+/**
+ * Bytes this archive has left to expand into, counted as they arrive.
+ *
+ * The per-entry caps already refuse to believe the declared size of one file.
+ * This is the same idea across the whole archive, because a thousand files that
+ * each stay under the per-file cap are not a thousand files that fit in memory
+ * — and the total was being taken from the central directory, which is a field
+ * the archive gets to write about itself.
+ */
+class ByteBudget {
+  constructor(private remaining: number) {}
 
-      const chunks: Buffer[] = [];
-      let total = 0;
+  /** False once the archive has expanded past what it was allowed. */
+  spend(bytes: number): boolean {
+    this.remaining -= bytes;
+    return this.remaining >= 0;
+  }
+}
 
-      stream.on('data', (chunk: Buffer) => {
-        total += chunk.length;
-        // Trust the stream, not the declared size: a lying central directory
-        // must not let a file expand past the cap.
-        if (total > maxBytes) {
-          stream.destroy();
-          reject(new Error(`Entry exceeds ${maxBytes} bytes`));
-          return;
-        }
-        chunks.push(chunk);
-      });
-      stream.on('error', reject);
-      stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    });
-  });
+export class ArchiveTooLargeError extends Error {}
+
+function readEntryText(
+  zipfile: ZipFile,
+  entry: Entry,
+  maxBytes: number,
+  budget: ByteBudget,
+): Promise<string> {
+  return readEntryBytes(zipfile, entry, maxBytes, budget).then((buffer) => buffer.toString('utf8'));
 }
 
 /**
@@ -223,6 +234,9 @@ export async function readArchive(
         return;
       }
 
+      // The *declared* total, which rejects an honest bomb before anything is
+      // decompressed. A hostile archive lies here, so the same cap is enforced
+      // again below against the bytes that actually arrive.
       totalUncompressedBytes += entry.uncompressedSize;
       if (totalUncompressedBytes > limits.maxTotalUncompressedBytes) {
         violations.push({
@@ -259,6 +273,9 @@ export async function readArchive(
   }));
 
   const files = new Map<string, string>();
+  // Shared across entries, so many small files cannot add up past the cap the
+  // way one large file cannot exceed it.
+  const budget = new ByteBudget(limits.maxTotalUncompressedBytes);
 
   for (const [index, { entry }] of raw.entries()) {
     const path = entries[index].path;
@@ -268,7 +285,7 @@ export async function readArchive(
     }
 
     try {
-      files.set(path, await readEntryText(zipfile, entry, limits.maxReadableFileBytes));
+      files.set(path, await readEntryText(zipfile, entry, limits.maxReadableFileBytes, budget));
     } catch (cause) {
       violations.push({
         kind: 'size_exceeded',
@@ -324,17 +341,27 @@ export async function extractFiles(
   const strippedRoot = findCommonRoot(collected.map((c) => c.normalised));
   const files = new Map<string, Buffer>();
 
+  // This function returns every file resident in memory, which makes it the
+  // path where a lying central directory would actually cost something — and it
+  // had no total at all, only a per-file cap.
+  const budget = new ByteBudget(limits.maxTotalUncompressedBytes);
+
   for (const { entry, normalised } of collected) {
     const path = strippedRoot ? normalised.slice(strippedRoot.length + 1) : normalised;
     const cap = limits.maxStoredFileBytes ?? DEFAULT_ARCHIVE_LIMITS.maxStoredFileBytes!;
-    files.set(path, await readEntryBytes(zipfile, entry, cap));
+    files.set(path, await readEntryBytes(zipfile, entry, cap, budget));
   }
 
   zipfile.close();
   return files;
 }
 
-function readEntryBytes(zipfile: ZipFile, entry: Entry, maxBytes: number): Promise<Buffer> {
+function readEntryBytes(
+  zipfile: ZipFile,
+  entry: Entry,
+  maxBytes: number,
+  budget: ByteBudget,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     zipfile.openReadStream(entry, (err, stream) => {
       if (err || !stream) {
@@ -347,9 +374,17 @@ function readEntryBytes(zipfile: ZipFile, entry: Entry, maxBytes: number): Promi
 
       stream.on('data', (chunk: Buffer) => {
         total += chunk.length;
+        // Both caps, on the bytes that actually arrived: this one file's size,
+        // and what the whole archive has left. The declared sizes were checked
+        // earlier and are not evidence of anything.
         if (total > maxBytes) {
           stream.destroy();
-          reject(new Error(`Entry exceeds ${maxBytes} bytes`));
+          reject(new ArchiveTooLargeError(`Entry exceeds ${maxBytes} bytes`));
+          return;
+        }
+        if (!budget.spend(chunk.length)) {
+          stream.destroy();
+          reject(new ArchiveTooLargeError('Archive expands past the total size limit'));
           return;
         }
         chunks.push(chunk);

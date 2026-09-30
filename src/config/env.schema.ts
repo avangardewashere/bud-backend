@@ -63,6 +63,26 @@ function compareUrls(a: string, b: string, part: (url: URL) => string): boolean 
 const sameOrigin = (a: string, b: string) => compareUrls(a, b, (url) => url.origin);
 const sameHost = (a: string, b: string) => compareUrls(a, b, (url) => url.host);
 
+/** The hostname of an origin setting, or undefined if it will not parse. */
+function hostnameOf(value: string): string | undefined {
+  try {
+    return new URL(value).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether a cookie sent with `Domain=domain` would reach `host`.
+ *
+ * RFC 6265's domain match: the host itself, or anything under it. The leading
+ * dot people write is not part of the comparison.
+ */
+function cookieDomainCovers(domain: string, host: string): boolean {
+  const scope = domain.replace(/^\./, '').toLowerCase();
+  return host === scope || host.endsWith(`.${scope}`);
+}
+
 /**
  * An origin setting, canonicalised on the way in.
  *
@@ -243,6 +263,30 @@ export const envSchema = z
           'COURSES_ORIGIN must differ from APP_ORIGIN. Course JavaScript is author-controlled ' +
           'and must not share an origin with the shell.',
       });
+    }
+
+    // A cookie domain is a wider grant than an origin, and it is the one way to
+    // hand the session cookie to the host that serves author-written HTML while
+    // passing every other check here. `APP_ORIGIN=https://app.bud.example` and
+    // `COURSES_ORIGIN=https://courses.bud.example` are two genuinely different
+    // origins — and `COOKIE_DOMAIN=.bud.example` puts the cookie on both.
+    //
+    // Nothing needs this setting on the $0 deploy: left unset, the cookie is
+    // host-only, which is what the shell's proxy arrangement wants anyway.
+    if (env.COOKIE_DOMAIN) {
+      const coursesHost = hostnameOf(env.COURSES_ORIGIN);
+
+      if (coursesHost && cookieDomainCovers(env.COOKIE_DOMAIN, coursesHost)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['COOKIE_DOMAIN'],
+          message:
+            `COOKIE_DOMAIN "${env.COOKIE_DOMAIN}" covers the host that serves course content ` +
+            `("${coursesHost}"), so the browser would send the session cookie to ` +
+            'author-controlled pages. Leave COOKIE_DOMAIN unset for a host-only cookie, or ' +
+            'serve course content from a host the cookie domain does not reach.',
+        });
+      }
     }
 
     if (env.NODE_ENV === 'production') {
