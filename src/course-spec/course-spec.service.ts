@@ -10,6 +10,8 @@ import {
   type ReadArchiveResult,
 } from './archive.js';
 import { MANIFEST_FILENAME, manifestSchema, type CourseManifest } from './manifest.schema.js';
+import { packagePathsReferencedBy, storageKeysUsedIn } from './references.js';
+import { suggestFieldFor } from './suggest-field.js';
 import {
   checksSkipped,
   error,
@@ -152,9 +154,7 @@ export class CourseSpecService {
         error(
           'manifest_invalid',
           `${MANIFEST_FILENAME} does not match the bud-course/1 spec.`,
-          validated.error.issues
-            .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
-            .join('\n'),
+          validated.error.issues.map(describeIssue).join('\n'),
         ),
       );
       results.push(checksSkipped(4, 'fix the manifest and try again.'));
@@ -224,7 +224,14 @@ export class CourseSpecService {
           error(
             'disallowed_extension',
             `${paths.length} file${paths.length === 1 ? '' : 's'} with a disallowed extension (.${ext})`,
-            `${paths.slice(0, 20).join('\n')}${paths.length > 20 ? `\n…and ${paths.length - 20} more` : ''}`,
+            // The allowed set, because the enum errors in this same tool name
+            // their vocabulary and this one used to leave the author guessing
+            // one extension per round trip.
+            `${paths.slice(0, 20).join('\n')}${paths.length > 20 ? `\n…and ${paths.length - 20} more` : ''}\n` +
+              `Allowed: ${[...ALLOWED_EXTENSIONS]
+                .sort()
+                .map((e) => `.${e}`)
+                .join(' ')}`,
           ),
         );
       }
@@ -257,19 +264,159 @@ export class CourseSpecService {
     }
 
     // ── 6. cover ────────────────────────────────────────────────────────────
+    // Each warning carries its own remedy. "No cover image" left an author who
+    // had put a cover.png at the package root with no way to learn that the
+    // manifest has to name it.
     if (!manifest.cover) {
-      results.push(warning('cover_missing', 'No cover image; default cover will be generated.'));
+      results.push(
+        warning(
+          'cover_missing',
+          'No cover image; default cover will be generated.',
+          'Add "cover": "<path>" to the manifest — a path relative to bud.manifest.json, ' +
+            'e.g. "assets/cover.png". A wide image works best: the catalog renders it at 16:9, ' +
+            'so 1200×675 is a good size.',
+        ),
+      );
     } else if (!present.has(manifest.cover)) {
       results.push(
         warning(
           'cover_missing',
           `Cover "${manifest.cover}" is missing; default cover will be generated.`,
+          'The path is relative to bud.manifest.json, and the file has to be inside the package.',
+        ),
+      );
+    } else {
+      // Said out loud, because the report enumerated everything except whether
+      // the one image an author deliberately made was being used at all.
+      const bytes = read.entries.find((e) => e.path === manifest.cover)?.uncompressedSize;
+      results.push(
+        pass(
+          'cover_found',
+          `Cover ${manifest.cover}${bytes === undefined ? '' : ` · ${formatBytes(bytes)}`}`,
         ),
       );
     }
 
+    // ── 7. the manifest against the files it names ──────────────────────────
+    results.push(...consistencyChecks(manifest, read.files, present));
+
     return { report: toReport(results), manifest, entries: read.entries };
   }
+}
+
+/**
+ * One Zod issue as a line an author can act on.
+ *
+ * The addition is the suggestion on an unrecognised key. Zod reports a rejected
+ * `description` and a missing `summary` as two unrelated lines, and joining them
+ * up was left to whoever was hand-writing their first manifest.
+ */
+function describeIssue(issue: { code: string; path: PropertyKey[]; message: string }): string {
+  const at = issue.path.map(String).join('.');
+  const line = `${at || '(root)'}: ${issue.message}`;
+
+  if (issue.code !== 'unrecognized_keys') {
+    return line;
+  }
+
+  const suggestions = ((issue as { keys?: string[] }).keys ?? [])
+    .map((key) => {
+      const field = suggestFieldFor(key, at);
+      return field ? `"${key}" → did you mean "${field}"?` : undefined;
+    })
+    .filter((s): s is string => s !== undefined);
+
+  return suggestions.length > 0 ? `${line}\n  ${suggestions.join('\n  ')}` : line;
+}
+
+/**
+ * Everything that can only be checked by reading the session files and the
+ * manifest against each other. All warnings, on purpose: each describes a
+ * package that works and is missing something, and this validator's rule is
+ * that warnings are worth fixing and never reasons to refuse.
+ */
+function consistencyChecks(
+  manifest: CourseManifest,
+  files: Map<string, string>,
+  present: Set<string>,
+): ValidationResult[] {
+  const results: ValidationResult[] = [];
+  const declared = new Set(manifest.storageKeys);
+  const used = new Set<string>();
+  let unresolved = false;
+
+  for (const session of manifest.sessions) {
+    const source = files.get(session.entry);
+    if (source === undefined) {
+      // Already reported as a missing entry.
+      continue;
+    }
+
+    const keys = storageKeysUsedIn(source);
+    for (const key of keys.keys) {
+      used.add(key);
+    }
+    unresolved ||= keys.unresolved;
+
+    // One result per file, per the contract: a session pointing at four missing
+    // images is one trip back to the folder.
+    const dangling = packagePathsReferencedBy(session.entry, source).filter(
+      (path) => !present.has(path),
+    );
+
+    if (dangling.length > 0) {
+      results.push(
+        warning(
+          'asset_missing',
+          `${session.entry} points at ${dangling.length} file${dangling.length === 1 ? '' : 's'} that ${dangling.length === 1 ? 'is' : 'are'} not in the package`,
+          `${dangling.slice(0, 20).join('\n')}${dangling.length > 20 ? `\n…and ${dangling.length - 20} more` : ''}\n` +
+            'Paths are relative to the file that names them. A learner sees a broken image.',
+        ),
+      );
+    }
+  }
+
+  const undeclared = [...used].filter((key) => !declared.has(key)).sort();
+  if (undeclared.length > 0) {
+    results.push(
+      warning(
+        'storage_key_undeclared',
+        `${undeclared.length} storage key${undeclared.length === 1 ? '' : 's'} used by a session but not declared in storageKeys`,
+        `${undeclared.join('\n')}\n` +
+          'Saving still works — Bud accepts an undeclared key — but the key will be missing from ' +
+          "the learner's export and from the admin view of this course.",
+      ),
+    );
+  }
+
+  const unused = [...declared].filter((key) => !usedAnywhere(key, manifest, files)).sort();
+  if (unused.length > 0) {
+    results.push(
+      warning(
+        'storage_key_unused',
+        `${unused.length} declared storage key${unused.length === 1 ? '' : 's'} that no session appears to use`,
+        `${unused.join('\n')}\n` +
+          'Usually a typo on one side or a session that was removed.' +
+          (unresolved
+            ? ' One or more keys in this course are built at runtime, so this list may include keys that are used after all.'
+            : ''),
+      ),
+    );
+  }
+
+  return results;
+}
+
+/**
+ * Whether a declared key appears anywhere in any session, literally.
+ *
+ * Looser than the call-site scan on purpose: this decides whether to *warn* that
+ * nothing uses a key, and a course that builds a key out of a prefix would
+ * otherwise be nagged about keys it uses perfectly well. A plain substring is
+ * the honest test of "did the author write this string down anywhere".
+ */
+function usedAnywhere(key: string, manifest: CourseManifest, files: Map<string, string>): boolean {
+  return manifest.sessions.some((session) => files.get(session.entry)?.includes(key) === true);
 }
 
 function describeViolation(kind: 'path_traversal' | 'symlink' | 'size_exceeded'): string {

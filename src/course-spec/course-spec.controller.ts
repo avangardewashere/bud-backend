@@ -1,12 +1,8 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { z } from 'zod';
 
 import { Public } from '../auth/decorators/public.decorator.js';
-import { ALLOWED_EXTENSIONS } from './course-spec.service.js';
-import { DEFAULT_ARCHIVE_LIMITS } from './archive.js';
-import { manifestSchema } from './manifest.schema.js';
-import { VALIDATION_CODES } from './validation.types.js';
+import { courseSpecDocument } from './spec-document.js';
 
 /**
  * Publishes the course package spec so the admin panel can show which fields
@@ -19,12 +15,6 @@ import { VALIDATION_CODES } from './validation.types.js';
 @ApiTags('course-spec')
 @Controller('course-spec')
 export class CourseSpecController {
-  /** Generated once: the schema cannot change at runtime. */
-  private readonly jsonSchema = z.toJSONSchema(manifestSchema, {
-    io: 'input',
-    target: 'draft-2020-12',
-  });
-
   @Public()
   @Get('schema')
   @ApiOperation({
@@ -35,19 +25,8 @@ export class CourseSpecController {
   })
   @ApiOkResponse({ description: 'The manifest schema and the limits that go with it.' })
   schema() {
-    return {
-      spec: 'bud-course/1',
-      manifestFilename: 'bud.manifest.json',
-      schema: this.jsonSchema,
-      limits: {
-        maxArchiveBytes: DEFAULT_ARCHIVE_LIMITS.maxArchiveBytes,
-        maxTotalUncompressedBytes: DEFAULT_ARCHIVE_LIMITS.maxTotalUncompressedBytes,
-        maxEntries: DEFAULT_ARCHIVE_LIMITS.maxEntries,
-      },
-      allowedExtensions: [...ALLOWED_EXTENSIONS].sort(),
-      // Published so the panel can key its hints off codes it knows about and
-      // degrade gracefully for ones added later.
-      validationCodes: [...VALIDATION_CODES],
-    };
+    // The same document `bud-course spec` prints, so an author working offline
+    // and the panel reading this route cannot be told different things.
+    return courseSpecDocument();
   }
 }

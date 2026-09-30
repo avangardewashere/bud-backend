@@ -83,6 +83,7 @@ curl -b cookies.txt http://localhost:3102/me
 | `npm run db:seed` | Create the admin user (refuses to run in production) |
 | `npm run admin:create -- <email>` | Create the **first** admin on any database, production included. Generates the password and prints it once; refuses once an admin exists. Needs `npm run build` |
 | `npm run invite -- <email> [--admin]` | Invite someone. Prints the link once. Needs `npm run build` |
+| `npm run course -- spec` | Every manifest field, what it accepts and what it is for, plus the limits and allowed file types. Offline. `--json` for the machine-readable form |
 | `npm run course -- init <dir>` | Start a course: manifest, outline, and a first session with the bridge wired |
 | `npm run course -- validate <path>` | Check a course package against the spec. Needs `npm run build`. See **Authoring a course** |
 | `npm run course -- pack <dir>` | Check a directory, then write the `.zip` to upload |
@@ -98,10 +99,22 @@ package is valid is a property of the files.
 
 ```bash
 npm run build
+npm run course -- spec                      # every field, offline
 npm run course -- init ./my-course          # id from the folder name
 npm run course -- validate ./my-course
 npm run course -- pack ./my-course          # writes <id>-<version>.zip
 ```
+
+**`spec` is the field reference**, and it is the first thing to run. It prints every manifest
+field, which ones are required, what each accepts and what it is for, plus the size limits and the
+allowed file types — offline, from the same schema the server validates against. `spec --json` is
+the machine-readable form, identical to what `GET /course-spec/schema` serves.
+
+It exists because four people were asked to write a course from nothing but this README and the
+CLI's output, and every one of them reverse-engineered the manifest by mutating fields and reading
+the errors: one spent twenty of their thirty-one commands doing it. The section you are reading
+promised that authoring "needs no running Bud" while the only description of the manifest was
+behind an HTTP endpoint.
 
 `init` writes a manifest, an outline and a first session, then validates what it wrote with the same
 code the upload route uses — a scaffold that needs fixing before it passes teaches the wrong thing.
@@ -112,10 +125,27 @@ bridge, so the template uses all of it correctly: `storage.get` resolving to `{ 
 the value (the detail everyone gets wrong first), `storage.delete` so "clear saved work" is not a
 button that silently does nothing, `bud.height` so the frame grows to the content and the shell owns
 scrolling, and `bud.ready`. It also falls back to `localStorage` when `window.storage` is absent, so
-the file can be opened straight from disk while it is being written. `Overall Plan.md` §3 has the
-frozen contract.
+the file can be opened straight from disk while it is being written.
 
-It takes a directory or an already-built `.zip`, and exits **0** when the package would be
+The whole bridge, which `Overall Plan.md` §3 freezes:
+
+| Call | What it does |
+|---|---|
+| `await storage.get(key)` | Resolves to `{ value }` — a string or `null`. **Not** the value itself |
+| `await storage.set(key, value)` | Saves a string. Serialise your own state; 1 MB a key, 32 MB a course |
+| `await storage.delete(key)` | Removes a key, so "start again" really does |
+| `bud.ready()` | Tell the shell the session has rendered |
+| `bud.height(px)` | Tell the shell how tall the frame should be — the shell owns scrolling |
+| `bud.complete(id)` | Mark a session complete. `id` is the session's `id` from the manifest |
+| `bud.progress(id, fraction)` | Part-way progress, `fraction` between 0 and 1. The scaffold stubs it without calling it, because when to report progress is a decision only the course can make |
+
+**Storage keys belong to the course, not to the session**, so session three can read what session one
+wrote — which is how a course carries state forward. Declare every key you use in the manifest's
+`storageKeys`: a `set` to an undeclared key still saves, but the key is then missing from the
+learner's export and from the admin view, and `validate` warns in both directions because a typo on
+one side of that list is invisible by eye.
+
+`validate` takes a directory or an already-built `.zip`, and exits **0** when the package would be
 accepted, **1** when it would be refused. Warnings never fail it: a missing cover image is worth
 telling someone about and is no reason to refuse their work. `--json` prints the report verbatim —
 the same shape `POST /admin/courses` returns — for a pre-commit hook or a CI step.

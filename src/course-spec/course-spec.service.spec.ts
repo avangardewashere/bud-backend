@@ -86,9 +86,16 @@ function realCoursePackage(overrides: ZipFileSpec[] = []): Promise<Buffer> {
   const files: ZipFileSpec[] = [
     { path: 'bud.manifest.json', content: JSON.stringify(realManifest) },
     { path: realManifest.outline!, content: '# Docker course outline' },
-    ...realManifest.sessions.map((s) => ({
+    // Each stub uses one of the keys the manifest declares. The keys used to be
+    // a made-up `"k"`, which was fine until the validator started checking the
+    // manifest against the files — and then the package that stands for "a
+    // correct course" was the one carrying two consistency warnings.
+    ...realManifest.sessions.map((s, index) => ({
       path: s.entry,
-      content: `<!doctype html><title>${s.title}</title><script>window.storage.get("k")</script>`,
+      content:
+        `<!doctype html><title>${s.title}</title>` +
+        `<script>const KEY = ${JSON.stringify(realManifest.storageKeys[index])};` +
+        `window.storage.get(KEY)</script>`,
     })),
   ];
 
@@ -287,6 +294,177 @@ describe('CourseSpecService', () => {
       );
 
       expect(codes(report)).toContain('disallowed_extension');
+    });
+  });
+
+  describe('the manifest against the files it names', () => {
+    /**
+     * Four people wrote a course each against nothing but the README and the
+     * CLI's output, and every one of them shipped a package the validator called
+     * publishable while something in it was wrong. These are their cases.
+     *
+     * All warnings: each describes a course that works and is missing
+     * something, and this validator's rule is that warnings never refuse.
+     */
+    it('warns about a storage key a session uses and the manifest does not declare', async () => {
+      const report = (
+        await service.validate(
+          await realCoursePackage([
+            {
+              path: realManifest.sessions[0].entry,
+              content: `<script>storage.set('docker-course:undeclared', '{}')</script>`,
+            },
+          ]),
+        )
+      ).report;
+
+      const result = find(report, 'storage_key_undeclared');
+      expect(result?.severity).toBe('warning');
+      expect(result?.detail).toContain('docker-course:undeclared');
+      // Saving an undeclared key works, so this must never block a publish.
+      expect(report.ok).toBe(true);
+    });
+
+    it('warns about a declared key nothing uses, which is how a typo shows up', async () => {
+      const manifest = {
+        ...realManifest,
+        storageKeys: [...realManifest.storageKeys, 'docker-course:ghost'],
+      };
+      const report = (
+        await service.validate(
+          await realCoursePackage([
+            { path: 'bud.manifest.json', content: JSON.stringify(manifest) },
+          ]),
+        )
+      ).report;
+
+      expect(find(report, 'storage_key_unused')?.detail).toContain('docker-course:ghost');
+    });
+
+    it('reads the key out of a const, the way the scaffolded template writes it', async () => {
+      // `const KEY = '…'; storage.set(KEY, …)` is what `init` generates, so a
+      // scanner that only understood literal arguments would report every
+      // template-derived course as using no keys at all.
+      const report = (await service.validate(await realCoursePackage())).report;
+
+      expect(codes(report)).not.toContain('storage_key_undeclared');
+      expect(codes(report)).not.toContain('storage_key_unused');
+    });
+
+    it('says nothing about keys when the manifest and the sessions agree', async () => {
+      const report = (await service.validate(await realCoursePackage())).report;
+
+      expect(report.ok).toBe(true);
+      expect(codes(report).filter((c) => c.startsWith('storage_key'))).toEqual([]);
+    });
+
+    it('warns when a session points at an image that is not in the package', async () => {
+      // Getting the *cover* path wrong produced a precise warning; getting an
+      // <img src> wrong produced "No problems. Publishable."
+      const report = (
+        await service.validate(
+          await realCoursePackage([
+            {
+              path: realManifest.sessions[0].entry,
+              content: `<img src="assets/diagram.png" alt=""><img src="assets/missing.png" alt="">`,
+            },
+            { path: 'assets/diagram.png', content: 'png' },
+          ]),
+        )
+      ).report;
+
+      const result = find(report, 'asset_missing');
+      expect(result?.severity).toBe('warning');
+      expect(result?.detail).toContain('assets/missing.png');
+      expect(result?.detail).not.toContain('assets/diagram.png');
+    });
+
+    it('resolves a reference against the file that names it, not the package root', async () => {
+      const session = realManifest.sessions.find((s) => s.entry.includes('/'));
+      if (!session) {
+        // The real manifest keeps sessions at the root; nothing to prove here.
+        return;
+      }
+
+      const report = (
+        await service.validate(
+          await realCoursePackage([
+            { path: session.entry, content: `<img src="pictures/one.png" alt="">` },
+            {
+              path: `${session.entry.slice(0, session.entry.lastIndexOf('/'))}/pictures/one.png`,
+              content: 'png',
+            },
+          ]),
+        )
+      ).report;
+
+      expect(codes(report)).not.toContain('asset_missing');
+    });
+
+    it('leaves external and data references alone', async () => {
+      const report = (
+        await service.validate(
+          await realCoursePackage([
+            {
+              path: realManifest.sessions[0].entry,
+              content:
+                '<img src="https://example.test/a.png" alt="">' +
+                '<img src="data:image/gif;base64,R0lGOD" alt="">' +
+                '<a href="#top">top</a><a href="mailto:x@example.test">mail</a>',
+            },
+          ]),
+        )
+      ).report;
+
+      expect(codes(report)).not.toContain('asset_missing');
+    });
+
+    it('suggests the right field name when an author writes a neighbouring one', async () => {
+      const { summary, ...withoutSummary } = realManifest;
+      const report = (
+        await service.validate(
+          await realCoursePackage([
+            {
+              path: 'bud.manifest.json',
+              content: JSON.stringify({ ...withoutSummary, description: summary }),
+            },
+          ]),
+        )
+      ).report;
+
+      // Zod reported the rejected key and the missing field as two unrelated
+      // lines; joining them was left to whoever was writing their first manifest.
+      expect(find(report, 'manifest_invalid')?.detail).toContain('did you mean "summary"');
+    });
+
+    it('refuses a session entry that is not HTML', async () => {
+      // This one is an error, not a warning: Bud serves a session as a document
+      // and never renders Markdown, so a .md entry is a course that is broken
+      // for every learner — and it used to validate clean.
+      const manifest = {
+        ...realManifest,
+        sessions: [{ ...realManifest.sessions[0], entry: 'session-1.md' }],
+      };
+      const report = (
+        await service.validate(
+          await makeZip([
+            { path: 'bud.manifest.json', content: JSON.stringify(manifest) },
+            { path: 'session-1.md', content: '# Session one' },
+          ]),
+        )
+      ).report;
+
+      expect(report.ok).toBe(false);
+      expect(find(report, 'manifest_invalid')?.detail).toContain('Must be an .html file');
+    });
+
+    it('names the allowed extensions when it refuses one', async () => {
+      const report = (
+        await service.validate(await realCoursePackage([{ path: 'notes.docx', content: 'x' }]))
+      ).report;
+
+      expect(find(report, 'disallowed_extension')?.detail).toContain('Allowed: ');
+      expect(find(report, 'disallowed_extension')?.detail).toContain('.html');
     });
   });
 

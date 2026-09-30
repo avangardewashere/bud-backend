@@ -40,7 +40,15 @@ export const VALIDATION_CODES = [
   'symlink',
   'size_exceeded',
 
+  // consistency between the manifest and the files it names. All warnings:
+  // every one of these describes a course that works and is missing something,
+  // and refusing a working package is worse than telling its author.
+  'storage_key_undeclared',
+  'storage_key_unused',
+  'asset_missing',
+
   // informational
+  'cover_found',
   'cover_missing',
   'checks_skipped',
 ] as const;

@@ -25,6 +25,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { DEFAULT_ARCHIVE_LIMITS } from '../course-spec/archive.js';
 import { CourseSpecService, type ValidationOutcome } from '../course-spec/course-spec.service.js';
 import { packCourseDirectory } from '../course-spec/pack.js';
+import { courseSpecDocument } from '../course-spec/spec-document.js';
 import { formatReport, summariseReport } from './report.js';
 import { scaffoldFiles, slugify } from './scaffold.js';
 
@@ -35,6 +36,8 @@ const USAGE = `bud-course — check and build Bud course packages
                              session with the storage bridge already wired
   validate <path> [--json]   Check a course directory or .zip against the spec
   pack <dir> [-o <file>]     Check a directory, then write the .zip to upload
+  spec [--json]              Every manifest field, the limits and the allowed
+                             file types — offline, no server needed
 
 A path to validate may be a directory of course files or an already-built .zip.
 Exits 0 when the package would be accepted, 1 when it would be refused.
@@ -151,6 +154,16 @@ export async function packCommand(argv: string[]): Promise<number> {
     throw new Error(`Not a directory: ${full}`);
   }
 
+  // Checked here when `-o` named the file, because whether it exists has nothing
+  // to do with whether the package is valid. Running `pack` twice used to print
+  // the whole green report and "No problems. Publishable." and only then refuse,
+  // so the reader believed a file had been written. Without `-o` the name comes
+  // from the manifest, so that check cannot move any earlier than the parse.
+  if (out !== undefined && existsSync(resolve(out)) && !force) {
+    process.stderr.write(`${resolve(out)} exists already. Pass --force to replace it.\n`);
+    return 1;
+  }
+
   const packed = await packCourseDirectory(full);
   const outcome = await new CourseSpecService().validate(packed.archive);
 
@@ -180,7 +193,11 @@ export async function packCommand(argv: string[]): Promise<number> {
   // A package may already be the one someone uploaded, and a version is
   // supposed to be immutable, so overwriting is a decision rather than a default.
   if (existsSync(target) && !force) {
-    process.stderr.write(`\n${target} exists already. Pass --force to replace it.\n`);
+    // "Nothing written" as the last line, so the ending and the exit code agree
+    // — the report above it says the package is fine, and it is.
+    process.stderr.write(
+      `\n${target} exists already. Pass --force to replace it, or -o to write elsewhere.\nNothing written.\n`,
+    );
     return 1;
   }
 
@@ -283,6 +300,144 @@ export async function initCommand(argv: string[]): Promise<number> {
   return 0;
 }
 
+/**
+ * The manifest reference, offline.
+ *
+ * The README opens the authoring section by promising that none of this needs a
+ * database, an environment or a running Bud — and then pointed at
+ * `GET /course-spec/schema` as the only description of the manifest. Every
+ * author who has written a course from scratch reverse-engineered the field
+ * names out of validation errors instead, one guess per round trip: one of them
+ * spent twenty of their thirty-one commands on it.
+ *
+ * Human-readable by default because that is what an author wants at that moment;
+ * `--json` prints the exact document the endpoint serves, for a script.
+ */
+export function specCommand(argv: string[]): number {
+  const document = courseSpecDocument();
+
+  if (argv.includes('--json')) {
+    process.stdout.write(`${JSON.stringify(document, null, 2)}\n`);
+    return 0;
+  }
+
+  const schema = document.schema as {
+    properties?: Record<string, JsonSchemaField>;
+    required?: string[];
+  };
+
+  process.stdout.write(`${document.manifestFilename} — spec ${document.spec}\n\n`);
+  process.stdout.write(describeFields(schema, 'course'));
+
+  const sessions = schema.properties?.sessions?.items;
+  if (sessions) {
+    process.stdout.write('\nEach entry in sessions:\n\n');
+    process.stdout.write(describeFields(sessions, 'session'));
+  }
+
+  const { maxArchiveBytes, maxTotalUncompressedBytes, maxEntries } = document.limits;
+  process.stdout.write(
+    '\nLimits\n' +
+      `  archive         ${(maxArchiveBytes / 1024 / 1024).toFixed(0)} MB\n` +
+      `  unpacked        ${(maxTotalUncompressedBytes / 1024 / 1024).toFixed(0)} MB\n` +
+      `  files           ${maxEntries}\n` +
+      `  file types      ${document.allowedExtensions.map((e) => `.${e}`).join(' ')}\n`,
+  );
+
+  process.stdout.write(
+    '\nAnything not listed above is refused rather than ignored, so a typo in a field name\n' +
+      'is an error and not a setting that silently does nothing. --json prints this verbatim.\n',
+  );
+
+  return 0;
+}
+
+interface JsonSchemaField {
+  type?: string | string[];
+  description?: string;
+  enum?: unknown[];
+  const?: unknown;
+  format?: string;
+  items?: { properties?: Record<string, JsonSchemaField>; required?: string[] };
+  properties?: Record<string, JsonSchemaField>;
+  anyOf?: JsonSchemaField[];
+  default?: unknown;
+}
+
+/** One line per field: name, required or not, and what it accepts. */
+function describeFields(
+  schema: { properties?: Record<string, JsonSchemaField>; required?: string[] },
+  what: string,
+): string {
+  const properties = schema.properties ?? {};
+  const required = new Set(schema.required ?? []);
+  const names = Object.keys(properties);
+
+  if (names.length === 0) {
+    return `  (no fields found for ${what})\n`;
+  }
+
+  const width = Math.max(...names.map((n) => n.length));
+
+  return names
+    .map((name) => {
+      const field = properties[name];
+      const mark = required.has(name) ? '*' : ' ';
+      const line = `  ${mark} ${name.padEnd(width)}  ${describeType(field)}\n`;
+      // The description below it, wrapped: these are sentences, and folding
+      // them into the type column would make both unreadable.
+      return field.description ? line + wrap(field.description, width + 6) : line;
+    })
+    .join('')
+    .concat(`\n  * required\n`);
+}
+
+/** Hanging-indented lines that fit a terminal, because a field note is prose. */
+function wrap(text: string, indent: number, width = 96): string {
+  const room = Math.max(24, width - indent);
+  const lines: string[] = [];
+  let line = '';
+
+  for (const word of text.split(/\s+/)) {
+    if (line === '') {
+      line = word;
+    } else if (line.length + 1 + word.length <= room) {
+      line += ` ${word}`;
+    } else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line !== '') {
+    lines.push(line);
+  }
+
+  return lines.map((l) => `${' '.repeat(indent)}${l}\n`).join('');
+}
+
+function describeType(field: JsonSchemaField): string {
+  if (field.const !== undefined) {
+    return `exactly ${JSON.stringify(field.const)}`;
+  }
+  if (field.enum) {
+    return field.enum.map((v) => String(v)).join(' | ');
+  }
+
+  // Zod emits `anyOf` for a nullable or optional union; the interesting branch
+  // is the one that is not `null`.
+  const branch = field.anyOf?.find((b) => b.type !== 'null') ?? field;
+  const type = Array.isArray(branch.type) ? branch.type.join(' | ') : (branch.type ?? 'value');
+
+  if (type === 'array') {
+    return branch.items?.properties ? 'array of objects' : 'array of strings';
+  }
+  if (type === 'object') {
+    return `object (${Object.keys(branch.properties ?? {}).join(', ') || 'no fields'})`;
+  }
+
+  return branch.format ? `${type} (${branch.format})` : type;
+}
+
 export async function run(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
 
@@ -293,6 +448,9 @@ export async function run(argv: string[]): Promise<number> {
       return validateCommand(rest);
     case 'pack':
       return packCommand(rest);
+    case 'spec':
+    case 'schema':
+      return specCommand(rest);
     case undefined:
     case '--help':
     case '-h':
