@@ -9,7 +9,11 @@ import { validateEnv } from './env.schema.js';
 
 const baseEnv = {
   APP_ORIGIN: 'http://localhost:3000',
-  COURSES_ORIGIN: 'http://localhost:3002',
+  // A different *host*, not just a different port — which is what both repos'
+  // development examples, CI and production all do, and what the origins guard
+  // enforces. This fixture was the only same-host arrangement anywhere, and it
+  // was the thing making the guard look like it permitted them.
+  COURSES_ORIGIN: 'http://127.0.0.1:3002',
   API_ORIGIN: 'http://localhost:3001',
   DATABASE_URL: 'postgresql://bud:bud@localhost:5432/bud',
   S3_ENDPOINT: 'http://localhost:9000',
@@ -90,21 +94,37 @@ describe('validateEnv', () => {
     ['an upper-case host', 'http://LOCALHOST:3000'],
     ['a differently-cased scheme', 'HTTP://localhost:3000'],
   ])('rejects a courses origin that is the app origin written with %s', (_case, coursesOrigin) => {
-    // A browser reads all of these as the same origin as APP_ORIGIN, so the
+    // A browser reads all of these as the same host as APP_ORIGIN, so the
     // sandbox is gone — but a string compare read them as different and booted.
     expect(() => validateEnv({ ...baseEnv, COURSES_ORIGIN: coursesOrigin })).toThrowError(
       /COURSES_ORIGIN must differ/,
     );
   });
 
-  it('rejects an explicit default port that makes the two origins the same', () => {
+  it('rejects the same host on a different port, because cookies ignore ports', () => {
+    // The property the COURSES_PORT docblock has always claimed and the guard
+    // did not enforce: two origins on one host share a cookie jar, so a port is
+    // not a boundary. The shell's build-time check has always compared hosts,
+    // so this is also the two repos agreeing about the rule for the first time.
     expect(() =>
       validateEnv({
         ...baseEnv,
-        APP_ORIGIN: 'http://localhost',
-        COURSES_ORIGIN: 'http://localhost:80',
+        APP_ORIGIN: 'http://localhost:3100',
+        COURSES_ORIGIN: 'http://localhost:3101',
       }),
-    ).toThrowError(/COURSES_ORIGIN must differ/);
+    ).toThrowError(/by host, not only by port/);
+  });
+
+  it('accepts loopback split across two spellings, which is how development runs', () => {
+    // localhost and 127.0.0.1 are different hosts to a browser's cookie jar,
+    // which is why both repos' .env.example files are arranged this way.
+    expect(() =>
+      validateEnv({
+        ...baseEnv,
+        APP_ORIGIN: 'http://localhost:3100',
+        COURSES_ORIGIN: 'http://127.0.0.1:3101',
+      }),
+    ).not.toThrow();
   });
 
   it.each([

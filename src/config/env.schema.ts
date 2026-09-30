@@ -60,8 +60,13 @@ function compareUrls(a: string, b: string, part: (url: URL) => string): boolean 
   }
 }
 
-const sameOrigin = (a: string, b: string) => compareUrls(a, b, (url) => url.origin);
-const sameHost = (a: string, b: string) => compareUrls(a, b, (url) => url.host);
+/**
+ * Both origin guards compare hostnames, not origins, for the same reason: what
+ * they protect is the session cookie, and a cookie is scoped to a host. A port
+ * is not a boundary a browser respects here.
+ */
+const sameHostname = (a: string, b: string) =>
+  compareUrls(a, b, (url) => url.hostname.toLowerCase());
 
 /** The hostname of an origin setting, or undefined if it will not parse. */
 function hostnameOf(value: string): string | undefined {
@@ -249,19 +254,27 @@ export const envSchema = z
     // The whole security model rests on course HTML living somewhere the shell's
     // cookies cannot reach. If these ever match, the isolation is gone.
     //
-    // Compared as origins, not as strings. A browser does not care how a URL was
-    // typed: `http://localhost:3000/`, `http://LOCALHOST:3000` and
-    // `http://localhost:80` beside `http://localhost` are each the same origin
-    // as their plainly-spelled twin, and each one used to boot past this guard
-    // with the sandbox quietly gone. Verified by running the four spellings
-    // through validateEnv.
-    if (sameOrigin(env.APP_ORIGIN, env.COURSES_ORIGIN)) {
+    // Compared by **hostname**, which is stricter than comparing origins and is
+    // the comparison the threat actually calls for: cookies ignore ports, so
+    // `localhost:3000` and `localhost:3002` are two origins sharing one cookie
+    // jar. The docblock on COURSES_PORT has said that for as long as this guard
+    // has existed, and the guard was not enforcing it; the shell's own
+    // build-time check compares hostnames, so the two repos disagreed about
+    // what the rule was. Parsed rather than compared as strings, because a
+    // trailing slash or an upper-case host is the same host to a browser.
+    //
+    // Nothing real pays for the tightening: both repos' development examples
+    // already serve courses from 127.0.0.1 while the app is on localhost, CI
+    // does the same, and in production the two are different hosts entirely.
+    if (sameHostname(env.APP_ORIGIN, env.COURSES_ORIGIN)) {
       ctx.addIssue({
         code: 'custom',
         path: ['COURSES_ORIGIN'],
         message:
-          'COURSES_ORIGIN must differ from APP_ORIGIN. Course JavaScript is author-controlled ' +
-          'and must not share an origin with the shell.',
+          'COURSES_ORIGIN must differ from APP_ORIGIN by host, not only by port — cookies ignore ' +
+          'ports, so a different port on the same host shares the shell’s cookies. Course ' +
+          'JavaScript is author-controlled and must not reach them. Locally, serve the shell from ' +
+          'localhost and course content from 127.0.0.1.',
       });
     }
 
@@ -310,7 +323,7 @@ export const envSchema = z
     // that host also serves course content (course content sharing the API's
     // port), a live session would sit on the course origin. Refuse until the
     // callback goes through the shell instead.
-    if (env.GITHUB_CLIENT_ID && sameHost(env.API_ORIGIN, env.COURSES_ORIGIN)) {
+    if (env.GITHUB_CLIENT_ID && sameHostname(env.API_ORIGIN, env.COURSES_ORIGIN)) {
       ctx.addIssue({
         code: 'custom',
         path: ['GITHUB_CLIENT_ID'],

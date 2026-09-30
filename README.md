@@ -273,12 +273,14 @@ owns in one go, so it is also the cheapest way to make the API do the most work.
   `src/auth/auth.service.spec.ts` and `test/e2e/register-enumeration.e2e-spec.ts`.
 - **Invites**: only the SHA-256 of the token is stored. Invites are bound to an
   email and claimed atomically, so two racing signups cannot both use one.
-- **Config**: boot fails if `COURSES_ORIGIN` equals `APP_ORIGIN` (that would
-  break the course sandbox), if cookies are insecure in production, if a seed
-  password is set in production, or if `SIGNUP_MODE=open` without
-  `SIGNUP_OPEN_ACK_ENUMERATION=true` — open signup cannot hide whether an
-  address already has an account, and that is worth typing out rather than
-  discovering.
+- **Config**: boot fails if `COURSES_ORIGIN` shares a **host** with `APP_ORIGIN`
+  — a different port is not enough, because cookies ignore ports, so course
+  JavaScript would share the shell's cookie jar; if `COOKIE_DOMAIN` is wide
+  enough to reach the course host, which is the same leak by a wider route; if
+  cookies are insecure in production; if a seed password is set in production;
+  or if `SIGNUP_MODE=open` without `SIGNUP_OPEN_ACK_ENUMERATION=true` — open
+  signup cannot hide whether an address already has an account, and that is
+  worth typing out rather than discovering.
 - **Logs**: cookies, auth headers, passwords and invite tokens are redacted.
 - **Who is calling**: rate limits and the sign-in brake key on the caller's
   address, so the API believes `X-Forwarded-For` only as far as a proxy it was
