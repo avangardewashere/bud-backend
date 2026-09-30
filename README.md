@@ -382,6 +382,14 @@ tamper with.
 
 ## Known gaps (intentional for Phase 0)
 
+**Read this list with one thing in mind:** Bud is a **portfolio piece** — one deployed instance
+with a public demo, whose only real learner is its owner. Decided 1 October 2026 and recorded in
+`Planning/Roadmap-Status.md`. It parks several of the gaps below rather than closing them: course
+version history, a learner-facing changelog, mail, invites by email, the signup budget, and every
+multi-user surface. A portfolio piece has one real user too — it just also has visitors, which is
+why `DEMO_MODE` is on in `render.yaml` and why the demo's sample course matters more than any of
+the parked work. Nothing is deleted; the reasoning holds if the framing ever changes.
+
 - ~~GitHub OAuth~~ — **done.** `GET /auth/github` and its callback. Unconfigured,
   the route 404s rather than existing and failing, and `GET /auth/providers`
   tells the shell whether to render the button. A GitHub identity links to an

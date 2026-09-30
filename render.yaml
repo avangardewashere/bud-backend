@@ -51,8 +51,20 @@ services:
         value: 'true'
       # Course files in the Neon bucket, through the S3 driver. Neon requires
       # path-style addressing, which is S3_FORCE_PATH_STYLE's default.
-      # The portfolio demo: one throwaway account anyone can try, reset to
-      # sample progress between visitors. Sign-up stays invite-only.
+      # The portfolio demo, and the point of deploying at all: one throwaway
+      # account anyone can try, reset to its sample progress once nobody has
+      # touched it for DEMO_RESET_IDLE_MINUTES. Without it a visitor meets a
+      # sign-in wall and leaves, and everything here is invisible.
+      #
+      # It was briefly turned off over its cost on a 0.5 GB database, then sized
+      # rather than guessed at: every visitor shares ONE account, so the footprint
+      # does not grow with traffic. `courseState` is capped at 32 MiB per course
+      # (StateService: 256 keys, 1 MiB each), notes are byte-capped, progress
+      # events are pruned to 500 on a timer, live sessions are capped at 20, and a
+      # reset deletes all six tables. Worst case is ~32 MiB per published course,
+      # reclaimed at the next reset, and only reachable by someone deliberately
+      # filling it. The scarce resource is Neon's free compute hours, which is the
+      # bill a demo is supposed to incur. Sign-up stays invite-only regardless.
       - key: DEMO_MODE
         value: 'true'
       - key: STORAGE_DRIVER
