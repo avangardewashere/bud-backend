@@ -73,7 +73,10 @@ export function scaffoldFiles(id: string, title?: string): ScaffoldFile[] {
   return [
     { path: 'bud.manifest.json', content: `${JSON.stringify(manifest, null, 2)}\n` },
     { path: 'outline.md', content: outline(courseTitle) },
-    { path: 'session-1.html', content: session(courseTitle, stateKey) },
+    {
+      path: 'session-1.html',
+      content: sessionFile(courseTitle, 'Your first session', 's1', stateKey),
+    },
   ];
 }
 
@@ -101,9 +104,19 @@ Replace this, and add a heading per session as you write them.
  *   scrolling rather than the course having its own scrollbar.
  * - `bud.ready()` tells the shell to drop its loading state.
  */
-function session(title: string, stateKey: string): string {
+/**
+ * One session file. Exported because `bud-course add-session` writes the same
+ * template as `init` — the second session an author adds should teach the bridge
+ * exactly as the first one does, and two copies of this would drift.
+ */
+export function sessionFile(
+  courseTitle: string,
+  sessionTitle: string,
+  sessionId: string,
+  stateKey: string,
+): string {
   return `<meta charset="utf-8">
-<title>${title} — Your first session</title>
+<title>${courseTitle} — ${sessionTitle}</title>
 <style>
   body { font: 16px/1.6 system-ui, sans-serif; margin: 0; padding: 1.5rem; max-width: 46rem; }
   label { display: block; margin: 1.25rem 0 0.35rem; font-weight: 600; }
@@ -166,7 +179,7 @@ function session(title: string, stateKey: string): string {
       // set() takes a string, so state is JSON.
       await storage.set(KEY, JSON.stringify(state));
       status.textContent = 'Saved';
-      if (state.done) bud.complete('s1');
+      if (state.done) bud.complete('${sessionId}');
     }, 400);
   }
 

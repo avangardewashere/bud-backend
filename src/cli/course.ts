@@ -24,16 +24,21 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 import { DEFAULT_ARCHIVE_LIMITS } from '../course-spec/archive.js';
 import { CourseSpecService, type ValidationOutcome } from '../course-spec/course-spec.service.js';
+import { MANIFEST_FILENAME, manifestSchema } from '../course-spec/manifest.schema.js';
+import { describeIssue } from '../course-spec/describe-issue.js';
 import { packCourseDirectory } from '../course-spec/pack.js';
 import { courseSpecDocument } from '../course-spec/spec-document.js';
 import { formatReport, summariseReport } from './report.js';
-import { scaffoldFiles, slugify } from './scaffold.js';
+import { scaffoldFiles, sessionFile, slugify } from './scaffold.js';
 
 const USAGE = `bud-course — check and build Bud course packages
 
   init <dir> [--id <slug>] [--title <title>]
                              Start a course: a manifest, an outline, and a first
                              session with the storage bridge already wired
+  add-session <dir> [--title <title>] [--weight light|medium|heavy]
+                             Add a session to a course that already exists:
+                             the manifest entry, its storage key and the file
   validate <path> [--json]   Check a course directory or .zip against the spec
   pack <dir> [-o <file>]     Check a directory, then write the .zip to upload
   spec [--json]              Every manifest field, the limits and the allowed
@@ -301,6 +306,172 @@ export async function initCommand(argv: string[]): Promise<number> {
 }
 
 /**
+ * Adds a session to a course that already exists.
+ *
+ * `init` writes "a first session" and then refuses to help ever again, because
+ * it will not write into a directory that has anything in it. So every author
+ * asked to write a three-session course did the same five coordinated edits by
+ * hand: a `sessions[]` entry with an id and an order that have to be unique, a
+ * matching `storageKeys` entry, a copied HTML file, and the key constant changed
+ * inside it. Four of those five had nothing checking them, and the CLI already
+ * knew every rule involved — it enforces them on the way back in.
+ *
+ * Three of the four authors asked for this by name. A three-session course is
+ * the normal case, and the toolkit only knew how to start one.
+ */
+export async function addSessionCommand(argv: string[]): Promise<number> {
+  const titleFlag = flag(argv, 'title');
+  const idFlag = flag(argv, 'id');
+  const weightFlag = flag(argv, 'weight');
+  const skip = new Set(
+    [titleFlag, idFlag, weightFlag].filter((value): value is string => value !== undefined),
+  );
+  const dir = argv.find((arg) => !arg.startsWith('-') && !skip.has(arg));
+
+  if (!dir) {
+    process.stderr.write(
+      'add-session needs a directory: bud-course add-session <dir> [--title <title>]\n',
+    );
+    return 2;
+  }
+
+  if (weightFlag !== undefined && !['light', 'medium', 'heavy'].includes(weightFlag)) {
+    process.stderr.write(`--weight must be light, medium or heavy, not "${weightFlag}".\n`);
+    return 2;
+  }
+
+  const full = resolve(dir);
+  const manifestPath = join(full, MANIFEST_FILENAME);
+
+  if (!existsSync(manifestPath)) {
+    process.stderr.write(
+      `No ${MANIFEST_FILENAME} in ${full}.\nStart a course with: bud-course init ${dir}\n`,
+    );
+    return 1;
+  }
+
+  // Parsed with the real schema, because everything below depends on knowing
+  // the ids and orders already in use. A manifest this cannot read is one an
+  // author should fix with the tool that explains it.
+  const source = readFileSync(manifestPath, 'utf8');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (cause) {
+    process.stderr.write(
+      `${MANIFEST_FILENAME} is not valid JSON: ${cause instanceof Error ? cause.message : 'unreadable'}\n`,
+    );
+    return 1;
+  }
+
+  const validated = manifestSchema.safeParse(parsed);
+  if (!validated.success) {
+    process.stderr.write(`${MANIFEST_FILENAME} does not match the spec yet, so there is no\n`);
+    process.stderr.write('safe place to add a session. What is wrong with it:\n\n');
+    for (const issue of validated.error.issues) {
+      process.stderr.write(`  ${describeIssue(issue)}\n`);
+    }
+    process.stderr.write(`\n  bud-course validate ${dir}\n  bud-course spec\n`);
+    return 1;
+  }
+
+  const manifest = validated.data;
+  const taken = {
+    ids: new Set(manifest.sessions.map((s) => s.id)),
+    entries: new Set(manifest.sessions.map((s) => s.entry)),
+    keys: new Set(manifest.storageKeys),
+  };
+
+  const position = manifest.sessions.length + 1;
+
+  // Follows whatever the author has been doing: `s1, s2, s3` from the scaffold,
+  // or `session-1` style if they renamed them. Guessing their convention beats
+  // imposing one on a course that already has three sessions named otherwise.
+  const shortStyle = manifest.sessions.every((s) => /^s\d+$/.test(s.id));
+  const id =
+    idFlag ?? nextFree((n) => (shortStyle ? `s${n}` : `session-${n}`), position, taken.ids);
+
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) {
+    process.stderr.write(
+      `"${id}" is not a usable session id: letters, digits, hyphens or underscores.\n`,
+    );
+    return 2;
+  }
+  if (taken.ids.has(id)) {
+    process.stderr.write(`Session id "${id}" is already used in this course.\n`);
+    return 1;
+  }
+
+  const entry = nextFree((n) => `session-${n}.html`, position, taken.entries);
+  const entryPath = join(full, entry);
+  if (existsSync(entryPath)) {
+    // Not in the manifest, but on disk: someone's work in progress.
+    process.stderr.write(`${entry} already exists. Move it aside, or add it to the manifest.\n`);
+    return 1;
+  }
+
+  const stateKey = nextFree((n) => `${manifest.id}:session-${n}`, position, taken.keys);
+  const title = titleFlag ?? `Session ${position}`;
+  const order = manifest.sessions.reduce((highest, s) => Math.max(highest, s.order), 0) + 1;
+
+  writeFileSync(entryPath, sessionFile(manifest.title, title, id, stateKey));
+
+  // Appended to the parsed object, so JSON.stringify emits the author's own key
+  // order back at them — JSON.parse preserves it. Indentation is normalised to
+  // two spaces, which is what `init` writes.
+  const updated = parsed as {
+    sessions: unknown[];
+    storageKeys?: string[];
+  };
+  updated.sessions.push({
+    id,
+    order,
+    title,
+    entry,
+    weight: weightFlag ?? 'light',
+  });
+  updated.storageKeys = [...(updated.storageKeys ?? []), stateKey];
+  writeFileSync(manifestPath, `${JSON.stringify(updated, null, 2)}\n`);
+
+  process.stdout.write(
+    `  created ${entry}\n` +
+      `  updated ${MANIFEST_FILENAME}\n` +
+      `    session  ${id} — "${title}", order ${order}\n` +
+      `    storage  ${stateKey}\n\n`,
+  );
+
+  // The whole package, with the same validator as everything else: adding a
+  // session should never be the thing that quietly breaks a course.
+  const packed = await packCourseDirectory(full);
+  const outcome = await new CourseSpecService().validate(packed.archive);
+
+  for (const line of formatReport(outcome.report)) {
+    process.stdout.write(`${line}\n`);
+  }
+  process.stdout.write(`\n${summariseReport(outcome.report)}\n`);
+
+  if (!outcome.report.ok) {
+    process.stderr.write(
+      '\nThe course does not validate with the session added. That is a bug in Bud,\n' +
+        'not in your course — the session it wrote came from the same template as init.\n',
+    );
+    return 1;
+  }
+
+  process.stdout.write(`\nWrite ${entry}, then:\n  npm run course -- validate ${dir}\n`);
+  return 0;
+}
+
+/** The first `shape(n)` that nothing has claimed, starting from `from`. */
+function nextFree(shape: (n: number) => string, from: number, used: Set<string>): string {
+  let n = from;
+  while (used.has(shape(n))) {
+    n += 1;
+  }
+  return shape(n);
+}
+
+/**
  * The manifest reference, offline.
  *
  * The README opens the authoring section by promising that none of this needs a
@@ -444,6 +615,9 @@ export async function run(argv: string[]): Promise<number> {
   switch (command) {
     case 'init':
       return initCommand(rest);
+    case 'add-session':
+    case 'add':
+      return addSessionCommand(rest);
     case 'validate':
       return validateCommand(rest);
     case 'pack':

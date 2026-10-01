@@ -11,7 +11,7 @@ import {
 } from './archive.js';
 import { MANIFEST_FILENAME, manifestSchema, type CourseManifest } from './manifest.schema.js';
 import { packagePathsReferencedBy, storageKeysUsedIn } from './references.js';
-import { suggestFieldFor } from './suggest-field.js';
+import { describeIssue } from './describe-issue.js';
 import {
   checksSkipped,
   error,
@@ -302,31 +302,6 @@ export class CourseSpecService {
 
     return { report: toReport(results), manifest, entries: read.entries };
   }
-}
-
-/**
- * One Zod issue as a line an author can act on.
- *
- * The addition is the suggestion on an unrecognised key. Zod reports a rejected
- * `description` and a missing `summary` as two unrelated lines, and joining them
- * up was left to whoever was hand-writing their first manifest.
- */
-function describeIssue(issue: { code: string; path: PropertyKey[]; message: string }): string {
-  const at = issue.path.map(String).join('.');
-  const line = `${at || '(root)'}: ${issue.message}`;
-
-  if (issue.code !== 'unrecognized_keys') {
-    return line;
-  }
-
-  const suggestions = ((issue as { keys?: string[] }).keys ?? [])
-    .map((key) => {
-      const field = suggestFieldFor(key, at);
-      return field ? `"${key}" → did you mean "${field}"?` : undefined;
-    })
-    .filter((s): s is string => s !== undefined);
-
-  return suggestions.length > 0 ? `${line}\n  ${suggestions.join('\n  ')}` : line;
 }
 
 /**

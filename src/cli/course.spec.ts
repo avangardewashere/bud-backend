@@ -386,3 +386,142 @@ describe('bud-course init', () => {
     expect(err.join('')).toContain('init needs a directory');
   });
 });
+
+/**
+ * `add-session`, which exists because `init` writes "a first session" and then
+ * refuses to help: it will not write into a directory that has anything in it.
+ * So every author asked for a three-session course did the same five
+ * coordinated edits by hand, four of which nothing checked.
+ *
+ * The property worth testing is not that a file appeared. It is that the five
+ * things that have to agree — the manifest entry, its id, its order, its
+ * declared storage key, and the key the written session actually saves under —
+ * agree without anyone holding them together.
+ */
+describe('bud-course add-session', () => {
+  /** A scaffolded course, which is where an author adds a second session from. */
+  async function started(name = 'course') {
+    const root = join(tree({}), name);
+    expect(await run(['init', root])).toBe(0);
+    out.length = 0;
+    return root;
+  }
+
+  const manifestIn = (root: string) =>
+    JSON.parse(readFileSync(join(root, 'bud.manifest.json'), 'utf8')) as {
+      storageKeys: string[];
+      sessions: { id: string; order: number; title: string; entry: string; weight?: string }[];
+    };
+
+  it('adds a session whose key, id and manifest entry already agree', async () => {
+    const root = await started('agree');
+
+    expect(await run(['add-session', root, '--title', 'Volumes'])).toBe(0);
+
+    const manifest = manifestIn(root);
+    const added = manifest.sessions[1];
+
+    expect(added).toMatchObject({ id: 's2', order: 2, title: 'Volumes', entry: 'session-2.html' });
+    expect(manifest.storageKeys).toContain('agree:session-2');
+
+    const session = readFileSync(join(root, 'session-2.html'), 'utf8');
+    // The three couplings an author maintained by hand: the key it saves under,
+    // the session it completes, and its own title.
+    expect(session).toContain('"agree:session-2"');
+    expect(session).toContain("bud.complete('s2')");
+    expect(session).toContain('Volumes');
+  });
+
+  it('leaves the course valid, checked with the same validator as everything else', async () => {
+    const root = await started('valid');
+
+    await run(['add-session', root]);
+    out.length = 0;
+
+    // Including the consistency checks: a session using a key the manifest does
+    // not declare is exactly what this command exists not to produce.
+    expect(await run(['validate', root])).toBe(0);
+    expect(printed()).not.toContain('storage key');
+  });
+
+  it('keeps counting, and follows the id style already in the course', async () => {
+    const root = await started('counting');
+
+    await run(['add-session', root]);
+    await run(['add-session', root]);
+
+    const manifest = manifestIn(root);
+    expect(manifest.sessions.map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+    expect(manifest.sessions.map((s) => s.order)).toEqual([1, 2, 3]);
+    expect(manifest.storageKeys).toEqual([
+      'counting:session-1',
+      'counting:session-2',
+      'counting:session-3',
+    ]);
+  });
+
+  it('does not reorder the manifest an author has been editing by hand', async () => {
+    const root = await started('ordered');
+    const before = Object.keys(manifestIn(root) as unknown as Record<string, unknown>);
+
+    await run(['add-session', root]);
+
+    expect(Object.keys(manifestIn(root) as unknown as Record<string, unknown>)).toEqual(before);
+  });
+
+  it('takes a weight, and defaults to the one the scaffold uses', async () => {
+    const root = await started('weighted');
+
+    await run(['add-session', root, '--weight', 'heavy']);
+    await run(['add-session', root]);
+
+    const manifest = manifestIn(root);
+    expect(manifest.sessions[1].weight).toBe('heavy');
+    expect(manifest.sessions[2].weight).toBe('light');
+  });
+
+  it('refuses a weight the manifest would not accept', async () => {
+    const root = await started('badweight');
+
+    expect(await run(['add-session', root, '--weight', 'enormous'])).toBe(2);
+    expect(err.join('')).toContain('light, medium or heavy');
+    expect(manifestIn(root).sessions).toHaveLength(1);
+  });
+
+  it('points at init when there is no course there yet', async () => {
+    const root = tree({});
+
+    expect(await run(['add-session', root])).toBe(1);
+    expect(err.join('')).toContain('bud-course init');
+  });
+
+  it('refuses to touch a manifest it cannot read, and says what is wrong', async () => {
+    const root = await started('broken');
+    const path = join(root, 'bud.manifest.json');
+    const manifest = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    manifest.description = manifest.summary;
+    delete manifest.summary;
+    writeFileSync(path, JSON.stringify(manifest, null, 2));
+
+    expect(await run(['add-session', root])).toBe(1);
+    const problems = err.join('');
+    // The same suggestion `validate` gives, from the same code: two qualities of
+    // message for one mistake was the thing worth removing.
+    expect(problems).toContain('did you mean "summary"');
+    expect(existsSync(join(root, 'session-2.html'))).toBe(false);
+  });
+
+  it('will not write over a session file that is already there', async () => {
+    const root = await started('occupied');
+    writeFileSync(join(root, 'session-2.html'), '<p>work in progress</p>');
+
+    expect(await run(['add-session', root])).toBe(1);
+    expect(err.join('')).toContain('already exists');
+    expect(readFileSync(join(root, 'session-2.html'), 'utf8')).toContain('work in progress');
+  });
+
+  it('needs a directory', async () => {
+    expect(await run(['add-session'])).toBe(2);
+    expect(err.join('')).toContain('add-session needs a directory');
+  });
+});

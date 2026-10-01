@@ -85,6 +85,7 @@ curl -b cookies.txt http://localhost:3102/me
 | `npm run invite -- <email> [--admin]` | Invite someone. Prints the link once. Needs `npm run build` |
 | `npm run course -- spec` | Every manifest field, what it accepts and what it is for, plus the limits and allowed file types. Offline. `--json` for the machine-readable form |
 | `npm run course -- init <dir>` | Start a course: manifest, outline, and a first session with the bridge wired |
+| `npm run course -- add-session <dir>` | Add a session to a course that exists: the manifest entry, a unique id and order, its storage key, and the file — all agreeing |
 | `npm run course -- validate <path>` | Check a course package against the spec. Needs `npm run build`. See **Authoring a course** |
 | `npm run course -- pack <dir>` | Check a directory, then write the `.zip` to upload |
 | `npm run course:ingest -- <dir> [--publish]` | Upload a course from disk in development, through the same path an admin upload takes |
@@ -101,6 +102,7 @@ package is valid is a property of the files.
 npm run build
 npm run course -- spec                      # every field, offline
 npm run course -- init ./my-course          # id from the folder name
+npm run course -- add-session ./my-course --title "Volumes"
 npm run course -- validate ./my-course
 npm run course -- pack ./my-course          # writes <id>-<version>.zip
 ```
@@ -115,6 +117,15 @@ CLI's output, and every one of them reverse-engineered the manifest by mutating 
 the errors: one spent twenty of their thirty-one commands doing it. The section you are reading
 promised that authoring "needs no running Bud" while the only description of the manifest was
 behind an HTTP endpoint.
+
+**`add-session` is how a course gets past one session.** `init` writes the first and then refuses to
+help, because it will not write into a directory that has anything in it — so going from one session
+to three used to mean five coordinated edits by hand: a `sessions[]` entry with an id and an order
+that have to be unique, a matching `storageKeys` entry, a copied HTML file, and the key constant
+changed inside it. Four of those five had nothing checking them, and the CLI already knew every rule
+involved, because it enforces them on the way back in. It follows the id style the course already
+uses, appends rather than reorders the manifest, writes the same session template `init` writes, and
+validates the whole package afterwards.
 
 `init` writes a manifest, an outline and a first session, then validates what it wrote with the same
 code the upload route uses — a scaffold that needs fixing before it passes teaches the wrong thing.
