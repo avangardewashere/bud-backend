@@ -156,6 +156,27 @@ wrote — which is how a course carries state forward. Declare every key you use
 learner's export and from the admin view, and `validate` warns in both directions because a typo on
 one side of that list is invisible by eye.
 
+### Seeing a course before you publish it
+
+**`preview` is not here, and deliberately not here: it lives in the shell repo.** Three of the four
+things authors asked to see — does that table wrap, does the cover read at the size it is used, does
+the outline render, does the accent colour apply — are questions about the shell's course page, and
+the renderer is the shell's. A `preview` in this repo would have had to reimplement it, which is a
+*larger* second implementation than the bridge host the original decision refused, and one whose
+failure mode is confident wrongness rather than silence. So preview is `npm run preview` in
+`Bud - frontend`, pointed at a course directory, rendering it with the real player and the real
+bridge. `Planning/Roadmap-Status.md` records the reversal and the terms it was granted on.
+
+Two things that stay true on this side as a result:
+
+- **`validate` is the authority on storage keys, not preview.** It reads the `storage.get/set/delete`
+  calls out of the session files and cross-checks them against `storageKeys` in both directions,
+  including telling you when a key is built at runtime and it could not follow it. Preview can show
+  you a save happening; only this can tell you the manifest agrees.
+- **`public/bridge.js` is never vendored into this repo.** A checked-in copy of the shell's bridge
+  goes stale silently, and its failure mode is an author proving the old contract to themselves. If
+  something here ever appears to need one, that is the signal to serve the real file or to stop.
+
 `validate` takes a directory or an already-built `.zip`, and exits **0** when the package would be
 accepted, **1** when it would be refused. Warnings never fail it: a missing cover image is worth
 telling someone about and is no reason to refuse their work. `--json` prints the report verbatim —

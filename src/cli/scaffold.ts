@@ -151,6 +151,14 @@ export function sessionFile(
 
   // So this file is also openable straight from disk while you write it. Inside
   // Bud, window.storage is injected before the page runs and this is unused.
+  //
+  // Both of those are true, and there is a third case where this fallback does
+  // not work: a sandboxed document served without the bridge. localStorage
+  // throws SecurityError in a frame that lacks allow-same-origin, and because
+  // the rejection happens inside the async start-up below rather than at parse
+  // time, the page paints and is then silently inert. Bud never serves a course
+  // that way — the content server always injects the bridge — so this is a
+  // warning to anyone building something that serves these files without it.
   const storage =
     window.storage ??
     {
