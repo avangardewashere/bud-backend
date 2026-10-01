@@ -106,3 +106,80 @@ describe('packagePathsReferencedBy', () => {
     ).toEqual(['a.png']);
   });
 });
+
+describe('the scanner against input built to break it', () => {
+  /**
+   * A session is author-written and a package may be 50 MB, so "it is only our
+   * own template" is not a defence — and this scanner runs on upload as well as
+   * in the CLI.
+   *
+   * The bound is generous because a shared CI runner is noisy. It does not need
+   * to be tight: the case it guards took **eighty seconds on four thousand
+   * spaces** before `CSS_URL`'s unquoted branch was made non-empty and
+   * whitespace-free. Anything still quadratic fails this by orders of
+   * magnitude, which is the only resolution that matters.
+   */
+  const LIMIT_MS = 2_000;
+
+  function timed(label: string, source: string) {
+    const started = performance.now();
+    storageKeysUsedIn(source);
+    packagePathsReferencedBy('sessions/one.html', source);
+    const ms = performance.now() - started;
+
+    expect(ms, `${label} took ${ms.toFixed(0)}ms`).toBeLessThan(LIMIT_MS);
+  }
+
+  const N = 50_000;
+
+  /**
+   * Deliberately small for the `url(` cases, and the reason matters: a regex is
+   * synchronous, so vitest cannot interrupt one. At 50,000 the old pattern
+   * would not fail this bound — it would hang the run, and a hang in CI is a
+   * six-hour job rather than a red test. At 4,000 it took eighty seconds, so
+   * reintroducing it fails loudly and in bounded time. The linear cases below
+   * keep the larger input because they are fast either way.
+   */
+  const N_URL = 4_000;
+
+  it('survives url( followed by whitespace that never closes', () => {
+    // The case that was quadratic twice over, each time for a different reason.
+    timed('unclosed url(', `body { background: url(${' '.repeat(N_URL)}`);
+  });
+
+  it('survives many unclosed url( runs in one file', () => {
+    timed('many unclosed url(', `url(${' '.repeat(200)}`.repeat(500));
+  });
+
+  it('survives an unterminated string after a const', () => {
+    timed('unterminated const', `const KEY = "${'a'.repeat(N)}`);
+  });
+
+  it('survives alternating quotes and backslashes', () => {
+    timed('quotes and backslashes', `const KEY = ${'"\\'.repeat(N / 2)}`);
+  });
+
+  it('survives an unterminated attribute value', () => {
+    timed('unterminated attribute', `<img src="${'z'.repeat(N)}`);
+  });
+
+  it('survives a srcset with thousands of candidates', () => {
+    timed('huge srcset', `<img srcset="${'a.png 1x, '.repeat(5_000)}">`);
+  });
+
+  it('still finds every shape of CSS url it should', () => {
+    // The fix narrowed the unquoted branch, so this is the other half of it.
+    for (const [css, expected] of [
+      ['body{background:url("a.png")}', ['a.png']],
+      ["body{background:url('b.png')}", ['b.png']],
+      ['body{background:url(c.png)}', ['c.png']],
+      ['body{background:url( d.png )}', ['d.png']],
+      ['body{background:url(\n  e.png\n)}', ['e.png']],
+      ['body{background:url(f.png?v=2#x)}', ['f.png']],
+      // Names no file, so there is nothing to report.
+      ['body{background:url()}', []],
+    ] as [string, string[]][]) {
+      expect(packagePathsReferencedBy('s.html', css), css).toEqual(expected);
+    }
+  });
+});
