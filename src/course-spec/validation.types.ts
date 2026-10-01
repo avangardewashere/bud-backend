@@ -46,6 +46,7 @@ export const VALIDATION_CODES = [
   'storage_key_undeclared',
   'storage_key_unused',
   'asset_missing',
+  'file_unreferenced',
 
   // informational
   'cover_found',

@@ -83,7 +83,10 @@ export class CourseSpecService {
     try {
       read = await readArchive(
         archive,
-        (path) => path === MANIFEST_FILENAME || /\.html?$/i.test(path),
+        // Stylesheets as well as HTML, because a stylesheet is the other place a
+        // course names a file: without them, a background image referenced only
+        // from `style.css` would be reported as used by nothing.
+        (path) => path === MANIFEST_FILENAME || /\.(html?|css)$/i.test(path),
         limits,
       );
     } catch (cause) {
@@ -320,6 +323,14 @@ function consistencyChecks(
   const used = new Set<string>();
   let unresolved = false;
 
+  // Everything the package names, by any route: the manifest's own fields, and
+  // whatever the files it names point at in turn.
+  const referenced = new Set<string>([
+    ...manifest.sessions.map((session) => session.entry),
+    ...(manifest.outline ? [manifest.outline] : []),
+    ...(manifest.cover ? [manifest.cover] : []),
+  ]);
+
   for (const session of manifest.sessions) {
     const source = files.get(session.entry);
     if (source === undefined) {
@@ -332,23 +343,56 @@ function consistencyChecks(
       used.add(key);
     }
     unresolved ||= keys.unresolved;
+  }
 
-    // One result per file, per the contract: a session pointing at four missing
-    // images is one trip back to the folder.
-    const dangling = packagePathsReferencedBy(session.entry, source).filter(
-      (path) => !present.has(path),
-    );
+  // Dangling references, from every file whose text was read — sessions and the
+  // stylesheets they load. One result per file, per the contract: a session
+  // pointing at four missing images is one trip back to the folder.
+  for (const [path, source] of files) {
+    if (path === MANIFEST_FILENAME) {
+      continue;
+    }
 
+    const names = packagePathsReferencedBy(path, source);
+    for (const name of names) {
+      referenced.add(name);
+    }
+
+    const dangling = names.filter((name) => !present.has(name));
     if (dangling.length > 0) {
       results.push(
         warning(
           'asset_missing',
-          `${session.entry} points at ${dangling.length} file${dangling.length === 1 ? '' : 's'} that ${dangling.length === 1 ? 'is' : 'are'} not in the package`,
+          `${path} points at ${dangling.length} file${dangling.length === 1 ? '' : 's'} that ${dangling.length === 1 ? 'is' : 'are'} not in the package`,
           `${dangling.slice(0, 20).join('\n')}${dangling.length > 20 ? `\n…and ${dangling.length - 20} more` : ''}\n` +
             'Paths are relative to the file that names them. A learner sees a broken image.',
         ),
       );
     }
+  }
+
+  // The mirror of the check above, and the author who asked for it had copied a
+  // 350 KB image into their package by accident: it was packed without comment
+  // and the report still said "No problems."
+  //
+  // Informational, and worded to be ignorable, because "nothing names it" is
+  // not "nothing uses it": a path built at runtime, or named from a stylesheet
+  // this did not read, is invisible here. Never a reason to refuse a package.
+  const unreferenced = [...present]
+    .filter((path) => path !== MANIFEST_FILENAME && !referenced.has(path))
+    .sort();
+
+  if (unreferenced.length > 0) {
+    results.push(
+      warning(
+        'file_unreferenced',
+        `${unreferenced.length} file${unreferenced.length === 1 ? '' : 's'} that nothing in the package appears to name`,
+        `${unreferenced.slice(0, 20).join('\n')}${unreferenced.length > 20 ? `\n…and ${unreferenced.length - 20} more` : ''}\n` +
+          'Packed anyway. Worth a look if you did not expect them — a left-over export grows ' +
+          'every download. A file named only by code that builds its path at runtime will ' +
+          'appear here and is fine.',
+      ),
+    );
   }
 
   const undeclared = [...used].filter((key) => !declared.has(key)).sort();

@@ -492,6 +492,66 @@ describe('CourseSpecService', () => {
       expect(codes(report)).not.toContain('asset_missing');
     });
 
+    it('reports a file nothing in the package names, without refusing it', async () => {
+      // The author who asked for this had copied a 350 KB image in by accident:
+      // packed without comment, and the report still said "No problems."
+      const report = (
+        await service.validate(
+          await realCoursePackage([{ path: 'assets/left-over-export.png', content: 'png' }]),
+        )
+      ).report;
+
+      const result = find(report, 'file_unreferenced');
+      expect(result?.severity).toBe('warning');
+      expect(result?.detail).toContain('assets/left-over-export.png');
+      expect(report.ok).toBe(true);
+    });
+
+    it('says nothing about a package where everything is named', async () => {
+      const report = (await service.validate(await realCoursePackage())).report;
+
+      expect(codes(report)).not.toContain('file_unreferenced');
+    });
+
+    it('counts a file named only from a stylesheet as named', async () => {
+      // The false positive that would make this check untrustworthy: a
+      // background image a session never mentions, because its stylesheet does.
+      // Stylesheets are read for exactly this reason.
+      const report = (
+        await service.validate(
+          await realCoursePackage([
+            {
+              path: realManifest.sessions[0].entry,
+              content: '<link rel="stylesheet" href="assets/style.css">',
+            },
+            { path: 'assets/style.css', content: 'body { background: url("paper.png"); }' },
+            { path: 'assets/paper.png', content: 'png' },
+          ]),
+        )
+      ).report;
+
+      expect(codes(report)).not.toContain('file_unreferenced');
+      expect(codes(report)).not.toContain('asset_missing');
+    });
+
+    it('reports a dangling reference from a stylesheet too, not only from a session', async () => {
+      const report = (
+        await service.validate(
+          await realCoursePackage([
+            {
+              path: realManifest.sessions[0].entry,
+              content: '<link rel="stylesheet" href="assets/style.css">',
+            },
+            { path: 'assets/style.css', content: 'body { background: url("gone.png"); }' },
+          ]),
+        )
+      ).report;
+
+      const result = find(report, 'asset_missing');
+      expect(result?.message).toContain('assets/style.css');
+      expect(result?.detail).toContain('assets/gone.png');
+    });
+
     it('suggests the right field name when an author writes a neighbouring one', async () => {
       const { summary, ...withoutSummary } = realManifest;
       const report = (
